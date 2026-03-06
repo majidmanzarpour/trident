@@ -120,6 +120,14 @@ select {
 
 .sidebar-body {
   padding: 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
 }
 
 .list {
@@ -131,21 +139,90 @@ select {
 }
 
 .list li {
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-  padding: 0.8rem;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  display: block;
 }
 
 .list span {
   color: #8ea1b5;
 }
 
+.scene-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.scene-item:hover {
+  border-color: rgba(110, 213, 192, 0.4);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.scene-item.is-selected {
+  border-color: rgba(246, 144, 54, 0.7);
+  background: rgba(246, 144, 54, 0.12);
+}
+
+.scene-item:focus-visible {
+  outline: 2px solid rgba(110, 213, 192, 0.75);
+  outline-offset: 2px;
+}
+
+.chip-button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
+}
+
+.chip-button:hover:not(:disabled) {
+  border-color: rgba(110, 213, 192, 0.4);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chip-button.is-active {
+  border-color: rgba(246, 144, 54, 0.65);
+  background: rgba(246, 144, 54, 0.14);
+}
+
+.chip-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .viewport-panel {
   display: grid;
   grid-template-rows: auto 1fr;
+}
+
+.viewport-subtoolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 0;
+  flex-wrap: wrap;
+}
+
+.viewport-canvas-shell {
+  position: relative;
+  min-height: 0;
 }
 
 .viewport-panel canvas {
@@ -157,6 +234,26 @@ select {
 .inspector-stack {
   display: grid;
   gap: 1rem;
+}
+
+.inspector-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.panel-hint {
+  margin: 0;
+  color: #8ea1b5;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.marquee-rect {
+  position: absolute;
+  border: 1px solid rgba(246, 144, 54, 0.9);
+  background: rgba(246, 144, 54, 0.14);
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 1024px) {

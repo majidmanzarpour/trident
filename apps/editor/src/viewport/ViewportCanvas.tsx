@@ -1,16 +1,51 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OrbitControls } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
-import type { DerivedRenderMesh, DerivedRenderScene, ViewportState } from "@web-hammer/render-pipeline";
-import { toTuple } from "@web-hammer/shared";
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, type PerspectiveCamera } from "three";
+import { Canvas, type RootState, useThree } from "@react-three/fiber";
+import { WebGPURenderer } from "three/webgpu";
+import {
+  disableBvhRaycast,
+  enableBvhRaycast,
+  type DerivedRenderMesh,
+  type DerivedRenderScene,
+  type ViewportState
+} from "@web-hammer/render-pipeline";
+import { snapVec3, toTuple, vec3 } from "@web-hammer/shared";
+import {
+  Box3,
+  BufferGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
+  Mesh,
+  Vector2,
+  Vector3,
+  type PerspectiveCamera
+} from "three";
+import type { ToolId } from "@web-hammer/tool-system";
 
 type ViewportCanvasProps = {
+  activeToolId: ToolId;
+  onClearSelection: () => void;
+  onFocusNode: (nodeId: string) => void;
+  onPlaceAsset: (position: { x: number; y: number; z: number }) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
   renderScene: DerivedRenderScene;
+  selectedNodeIds: string[];
   viewport: ViewportState;
 };
 
-function EditorCameraRig({ viewport }: Pick<ViewportCanvasProps, "viewport">) {
+type MarqueeState = {
+  active: boolean;
+  current: Vector2;
+  origin: Vector2;
+};
+
+const tempBox = new Box3();
+const projectedPoint = new Vector3();
+
+function EditorCameraRig({
+  controlsEnabled,
+  viewport
+}: Pick<ViewportCanvasProps, "viewport"> & { controlsEnabled: boolean }) {
   const camera = useThree((state) => state.camera as PerspectiveCamera);
   const controlsRef = useRef<any>(null);
 
@@ -33,16 +68,22 @@ function EditorCameraRig({ viewport }: Pick<ViewportCanvasProps, "viewport">) {
       ref={controlsRef}
       dampingFactor={0.12}
       enableDamping
+      enabled={controlsEnabled}
       makeDefault
       maxDistance={viewport.camera.maxDistance}
-      maxPolarAngle={Math.PI / 2.02}
       minDistance={viewport.camera.minDistance}
+      minPolarAngle={0.01}
+      maxPolarAngle={Math.PI - 0.01}
       target={toTuple(viewport.camera.target)}
     />
   );
 }
 
-function ConstructionGrid({ viewport }: Pick<ViewportCanvasProps, "viewport">) {
+function ConstructionGrid({
+  activeToolId,
+  onPlaceAsset,
+  viewport
+}: Pick<ViewportCanvasProps, "activeToolId" | "onPlaceAsset" | "viewport">) {
   if (!viewport.grid.visible) {
     return null;
   }
@@ -51,7 +92,23 @@ function ConstructionGrid({ viewport }: Pick<ViewportCanvasProps, "viewport">) {
 
   return (
     <group position={[0, viewport.grid.elevation, 0]}>
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.0125, 0]}>
+      <mesh
+        onClick={(event) => {
+          if (activeToolId !== "asset-place") {
+            return;
+          }
+
+          event.stopPropagation();
+          const snapped = snapVec3(
+            vec3(event.point.x, viewport.grid.elevation, event.point.z),
+            viewport.grid.snapSize
+          );
+          onPlaceAsset(snapped);
+        }}
+        receiveShadow
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.0125, 0]}
+      >
         <planeGeometry args={[viewport.grid.size, viewport.grid.size]} />
         <meshStandardMaterial color="#0d151e" metalness={0.1} roughness={0.95} transparent opacity={0.65} />
       </mesh>
@@ -61,7 +118,26 @@ function ConstructionGrid({ viewport }: Pick<ViewportCanvasProps, "viewport">) {
   );
 }
 
-function RenderPrimitive({ mesh }: { mesh: DerivedRenderMesh }) {
+function RenderPrimitive({
+  hovered,
+  mesh,
+  onFocusNode,
+  onHoverEnd,
+  onHoverStart,
+  onMeshObjectChange,
+  onSelectNodes,
+  selected
+}: {
+  hovered: boolean;
+  mesh: DerivedRenderMesh;
+  onFocusNode: (nodeId: string) => void;
+  onHoverEnd: () => void;
+  onHoverStart: (nodeId: string) => void;
+  onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
+  selected: boolean;
+}) {
+  const meshRef = useRef<Mesh | null>(null);
   const geometry = useMemo(() => {
     if (!mesh.surface) {
       return undefined;
@@ -71,27 +147,62 @@ function RenderPrimitive({ mesh }: { mesh: DerivedRenderMesh }) {
     bufferGeometry.setAttribute("position", new Float32BufferAttribute(mesh.surface.positions, 3));
     bufferGeometry.setIndex(mesh.surface.indices);
     bufferGeometry.computeVertexNormals();
+    bufferGeometry.computeBoundingBox();
+    bufferGeometry.computeBoundingSphere();
 
     return bufferGeometry;
   }, [mesh.surface]);
 
   useEffect(() => {
+    const currentMesh = meshRef.current;
+
+    if (geometry && currentMesh && mesh.bvhEnabled) {
+      enableBvhRaycast(currentMesh, geometry);
+    }
+
     return () => {
+      if (geometry) {
+        disableBvhRaycast(geometry);
+      }
+
       geometry?.dispose();
     };
-  }, [geometry]);
+  }, [geometry, mesh.bvhEnabled]);
 
   const materialProps = {
-    color: mesh.material.color,
+    color: selected ? "#ffb35a" : hovered ? "#d8f4f0" : mesh.material.color,
+    flatShading: mesh.material.flatShaded,
     wireframe: mesh.material.wireframe,
     metalness: mesh.material.wireframe ? 0.05 : 0.15,
     roughness: mesh.material.wireframe ? 0.45 : 0.72,
-    side: DoubleSide
+    side: DoubleSide,
+    emissive: selected ? "#f69036" : hovered ? "#2a7f74" : "#000000",
+    emissiveIntensity: selected ? 0.42 : hovered ? 0.16 : 0
   };
 
   return (
     <mesh
       castShadow
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelectNodes([mesh.nodeId]);
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onFocusNode(mesh.nodeId);
+      }}
+      onPointerOut={(event) => {
+        event.stopPropagation();
+        onHoverEnd();
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        onHoverStart(mesh.nodeId);
+      }}
+      ref={(object) => {
+        meshRef.current = object;
+        onMeshObjectChange(mesh.nodeId, object);
+      }}
       receiveShadow
       position={toTuple(mesh.position)}
       rotation={toTuple(mesh.rotation)}
@@ -117,11 +228,35 @@ function RenderPrimitive({ mesh }: { mesh: DerivedRenderMesh }) {
   );
 }
 
-function ScenePreview({ renderScene }: Pick<ViewportCanvasProps, "renderScene">) {
+function ScenePreview({
+  onFocusNode,
+  onMeshObjectChange,
+  onSelectNode,
+  renderScene,
+  selectedNodeIds
+}: {
+  onFocusNode: (nodeId: string) => void;
+  onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
+  onSelectNode: (nodeIds: string[]) => void;
+  renderScene: DerivedRenderScene;
+  selectedNodeIds: string[];
+}) {
+  const [hoveredNodeId, setHoveredNodeId] = useState<string>();
+
   return (
     <>
       {renderScene.meshes.map((mesh) => (
-        <RenderPrimitive key={mesh.nodeId} mesh={mesh} />
+        <RenderPrimitive
+          hovered={hoveredNodeId === mesh.nodeId}
+          key={mesh.nodeId}
+          mesh={mesh}
+          onFocusNode={onFocusNode}
+          onHoverEnd={() => setHoveredNodeId(undefined)}
+          onHoverStart={setHoveredNodeId}
+          onMeshObjectChange={onMeshObjectChange}
+          onSelectNodes={onSelectNode}
+          selected={selectedNodeIds.includes(mesh.nodeId)}
+        />
       ))}
 
       {renderScene.entityMarkers.map((entity) => (
@@ -140,26 +275,239 @@ function ScenePreview({ renderScene }: Pick<ViewportCanvasProps, "renderScene">)
   );
 }
 
-export function ViewportCanvas({ renderScene, viewport }: ViewportCanvasProps) {
+export function ViewportCanvas({
+  activeToolId,
+  onClearSelection,
+  onFocusNode,
+  onPlaceAsset,
+  onSelectNodes,
+  renderScene,
+  selectedNodeIds,
+  viewport
+}: ViewportCanvasProps) {
+  const cameraRef = useRef<PerspectiveCamera | null>(null);
+  const marqueeActiveRef = useRef(false);
+  const meshObjectsRef = useRef(new Map<string, Mesh>());
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+
+  const handleMeshObjectChange = (nodeId: string, object: Mesh | null) => {
+    if (object) {
+      meshObjectsRef.current.set(nodeId, object);
+      return;
+    }
+
+    meshObjectsRef.current.delete(nodeId);
+  };
+
+  const handlePointerDown: React.PointerEventHandler<HTMLDivElement> = (event) => {
+    if (event.button !== 0 || !event.shiftKey) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
+
+    marqueeActiveRef.current = true;
+    setMarquee({
+      active: true,
+      current: point,
+      origin: point
+    });
+  };
+
+  const handlePointerMove: React.PointerEventHandler<HTMLDivElement> = (event) => {
+    if (!marqueeActiveRef.current || !marquee) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
+
+    setMarquee({
+      ...marquee,
+      current: point
+    });
+  };
+
+  const handlePointerUp: React.PointerEventHandler<HTMLDivElement> = (event) => {
+    if (!marqueeActiveRef.current || !marquee) {
+      return;
+    }
+
+    marqueeActiveRef.current = false;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const point = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
+    const finalMarquee = {
+      ...marquee,
+      current: point
+    };
+
+    setMarquee(null);
+
+    if (!cameraRef.current) {
+      return;
+    }
+
+    const selectionRect = createScreenRect(finalMarquee.origin, finalMarquee.current);
+
+    if (selectionRect.width < 4 && selectionRect.height < 4) {
+      return;
+    }
+
+    const selectedIds = Array.from(meshObjectsRef.current.entries())
+      .filter(([, object]) => intersectsSelectionRect(object, cameraRef.current!, bounds, selectionRect))
+      .map(([nodeId]) => nodeId);
+
+    if (selectedIds.length > 0) {
+      onSelectNodes(selectedIds);
+      return;
+    }
+
+    onClearSelection();
+  };
+
+  const marqueeRect = marquee ? createScreenRect(marquee.origin, marquee.current) : undefined;
+
   return (
-    <Canvas
-      camera={{
-        far: viewport.camera.far,
-        fov: viewport.camera.fov,
-        near: viewport.camera.near,
-        position: toTuple(viewport.camera.position)
-      }}
-      shadows
+    <div
+      className="viewport-canvas-shell"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
     >
-      <color attach="background" args={["#0b1118"]} />
-      <fog attach="fog" args={["#0b1118", 45, 180]} />
-      <ambientLight intensity={0.45} />
-      <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} />
-      <directionalLight castShadow intensity={1.4} position={[18, 26, 12]} shadow-mapSize-height={2048} shadow-mapSize-width={2048} />
-      <EditorCameraRig viewport={viewport} />
-      <ConstructionGrid viewport={viewport} />
-      <axesHelper args={[3]} />
-      <ScenePreview renderScene={renderScene} />
-    </Canvas>
+      <Canvas
+        camera={{
+          far: viewport.camera.far,
+          fov: viewport.camera.fov,
+          near: viewport.camera.near,
+          position: toTuple(viewport.camera.position)
+        }}
+        gl={async (props) => {
+          const renderer = new WebGPURenderer(props as ConstructorParameters<typeof WebGPURenderer>[0]);
+          await renderer.init();
+          return renderer;
+        }}
+        onCreated={(state: RootState) => {
+          cameraRef.current = state.camera as PerspectiveCamera;
+        }}
+        onPointerMissed={() => {
+          if (!marqueeActiveRef.current) {
+            onClearSelection();
+          }
+        }}
+        shadows
+      >
+        <color attach="background" args={["#0b1118"]} />
+        <fog attach="fog" args={["#0b1118", 45, 180]} />
+        <ambientLight intensity={0.45} />
+        <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} />
+        <directionalLight
+          castShadow
+          intensity={1.4}
+          position={[18, 26, 12]}
+          shadow-bias={-0.0002}
+          shadow-mapSize-height={2048}
+          shadow-mapSize-width={2048}
+          shadow-normalBias={0.045}
+        />
+        <EditorCameraRig controlsEnabled={!marqueeActiveRef.current} viewport={viewport} />
+        <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} />
+        <axesHelper args={[3]} />
+        <ScenePreview
+          onFocusNode={onFocusNode}
+          onMeshObjectChange={handleMeshObjectChange}
+          onSelectNode={onSelectNodes}
+          renderScene={renderScene}
+          selectedNodeIds={selectedNodeIds}
+        />
+      </Canvas>
+
+      {marqueeRect ? (
+        <div
+          className="marquee-rect"
+          style={{
+            height: marqueeRect.height,
+            left: marqueeRect.left,
+            top: marqueeRect.top,
+            width: marqueeRect.width
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function createScreenRect(origin: Vector2, current: Vector2) {
+  return {
+    height: Math.abs(current.y - origin.y),
+    left: Math.min(origin.x, current.x),
+    top: Math.min(origin.y, current.y),
+    width: Math.abs(current.x - origin.x)
+  };
+}
+
+function intersectsSelectionRect(
+  object: Mesh,
+  camera: PerspectiveCamera,
+  viewportBounds: DOMRect,
+  selectionRect: ReturnType<typeof createScreenRect>
+): boolean {
+  tempBox.setFromObject(object);
+
+  if (tempBox.isEmpty()) {
+    return false;
+  }
+
+  const screenRect = projectBoxToScreenRect(tempBox, camera, viewportBounds);
+  return rectsIntersect(screenRect, selectionRect);
+}
+
+function projectBoxToScreenRect(box: Box3, camera: PerspectiveCamera, viewportBounds: DOMRect) {
+  const min = box.min;
+  const max = box.max;
+  const corners = [
+    [min.x, min.y, min.z],
+    [min.x, min.y, max.z],
+    [min.x, max.y, min.z],
+    [min.x, max.y, max.z],
+    [max.x, min.y, min.z],
+    [max.x, min.y, max.z],
+    [max.x, max.y, min.z],
+    [max.x, max.y, max.z]
+  ];
+
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+
+  corners.forEach(([x, y, z]) => {
+    projectedPoint.set(x, y, z).project(camera);
+    const screenX = ((projectedPoint.x + 1) * 0.5) * viewportBounds.width;
+    const screenY = ((1 - projectedPoint.y) * 0.5) * viewportBounds.height;
+
+    left = Math.min(left, screenX);
+    right = Math.max(right, screenX);
+    top = Math.min(top, screenY);
+    bottom = Math.max(bottom, screenY);
+  });
+
+  return {
+    height: Math.max(0, bottom - top),
+    left,
+    top,
+    width: Math.max(0, right - left)
+  };
+}
+
+function rectsIntersect(
+  left: ReturnType<typeof createScreenRect>,
+  right: ReturnType<typeof createScreenRect>
+) {
+  return !(
+    left.left + left.width < right.left ||
+    right.left + right.width < left.left ||
+    left.top + left.height < right.top ||
+    right.top + right.height < left.top
   );
 }

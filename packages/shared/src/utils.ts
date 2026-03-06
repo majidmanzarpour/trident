@@ -60,6 +60,18 @@ export function almostEqual(left: number, right: number, epsilon = 0.0001): bool
   return Math.abs(left - right) <= epsilon;
 }
 
+export function snapValue(value: number, increment: number): number {
+  if (increment <= 0) {
+    return value;
+  }
+
+  return Math.round(value / increment) * increment;
+}
+
+export function snapVec3(vector: Vec3, increment: number): Vec3 {
+  return vec3(snapValue(vector.x, increment), snapValue(vector.y, increment), snapValue(vector.z, increment));
+}
+
 export function makeTransform(position = vec3(0, 0, 0)): Transform {
   return {
     position,

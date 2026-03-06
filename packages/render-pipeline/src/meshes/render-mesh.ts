@@ -22,6 +22,7 @@ export type RenderPrimitive =
 
 export type RenderMaterial = {
   color: string;
+  flatShaded: boolean;
   wireframe: boolean;
 };
 
@@ -73,6 +74,7 @@ export function createDerivedRenderMesh(node: GeometryNode): DerivedRenderMesh {
     surface,
     material: {
       color: appearance.color,
+      flatShaded: appearance.flatShaded,
       wireframe: appearance.wireframe
     }
   };
@@ -80,12 +82,14 @@ export function createDerivedRenderMesh(node: GeometryNode): DerivedRenderMesh {
 
 function getRenderAppearance(node: GeometryNode): {
   color: string;
+  flatShaded: boolean;
   wireframe: boolean;
   primitiveLabel: string;
 } {
   if (isBrushNode(node)) {
     return {
       color: "#f69036",
+      flatShaded: true,
       wireframe: false,
       primitiveLabel: "box"
     };
@@ -94,6 +98,7 @@ function getRenderAppearance(node: GeometryNode): {
   if (isMeshNode(node)) {
     return {
       color: "#6ed5c0",
+      flatShaded: true,
       wireframe: true,
       primitiveLabel: "poly"
     };
@@ -102,6 +107,7 @@ function getRenderAppearance(node: GeometryNode): {
   if (isModelNode(node)) {
     return {
       color: "#7f8ea3",
+      flatShaded: false,
       wireframe: false,
       primitiveLabel: "model"
     };
@@ -109,6 +115,7 @@ function getRenderAppearance(node: GeometryNode): {
 
   return {
     color: "#ffffff",
+    flatShaded: false,
     wireframe: false,
     primitiveLabel: "mesh"
   };
@@ -117,17 +124,29 @@ function getRenderAppearance(node: GeometryNode): {
 function createBrushSurface(node: Extract<GeometryNode, { kind: "brush" }>["data"]): DerivedSurfaceGeometry | undefined {
   const rebuilt = reconstructBrushFaces(node);
 
-  if (!rebuilt.valid || rebuilt.vertices.length === 0) {
+  if (!rebuilt.valid || rebuilt.faces.length === 0) {
     return undefined;
   }
 
-  const vertexIndexById = new Map(rebuilt.vertices.map((vertex, index) => [vertex.id, index]));
+  const positions: number[] = [];
+  const indices: number[] = [];
+  let vertexOffset = 0;
+
+  rebuilt.faces.forEach((face) => {
+    face.vertices.forEach((vertex) => {
+      positions.push(vertex.position.x, vertex.position.y, vertex.position.z);
+    });
+
+    face.triangleIndices.forEach((index) => {
+      indices.push(vertexOffset + index);
+    });
+
+    vertexOffset += face.vertices.length;
+  });
 
   return {
-    positions: rebuilt.vertices.flatMap((vertex) => [vertex.position.x, vertex.position.y, vertex.position.z]),
-    indices: rebuilt.faces.flatMap((face) =>
-      face.triangleIndices.map((localIndex) => vertexIndexById.get(face.vertexIds[localIndex]) ?? 0)
-    )
+    positions,
+    indices
   };
 }
 
