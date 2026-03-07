@@ -1,12 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import { CanvasTexture, FrontSide, Mesh, MeshStandardMaterial, RepeatWrapping, SRGBColorSpace, TextureLoader } from "three";
+import {
+  BoxGeometry,
+  CylinderGeometry,
+  EdgesGeometry,
+  FrontSide,
+  IcosahedronGeometry,
+  Mesh,
+  MeshStandardMaterial,
+  Object3D,
+  RepeatWrapping,
+  SRGBColorSpace,
+  TextureLoader,
+  type BufferGeometry
+} from "three";
 import { disableBvhRaycast, enableBvhRaycast, type DerivedRenderMesh, type DerivedRenderScene } from "@web-hammer/render-pipeline";
 import { createBlockoutTextureDataUri, resolveTransformPivot, toTuple } from "@web-hammer/shared";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
+import type { ViewportRenderMode } from "@/viewport/viewports";
 
 export function ScenePreview({
   hiddenNodeIds = [],
   interactive,
+  renderMode = "lit",
   onFocusNode,
   onMeshObjectChange,
   onSelectNode,
@@ -15,6 +30,7 @@ export function ScenePreview({
 }: {
   hiddenNodeIds?: string[];
   interactive: boolean;
+  renderMode?: ViewportRenderMode;
   onFocusNode: (nodeId: string) => void;
   onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
   onSelectNode: (nodeIds: string[]) => void;
@@ -38,6 +54,7 @@ export function ScenePreview({
             onHoverStart={setHoveredNodeId}
             onMeshObjectChange={onMeshObjectChange}
             onSelectNodes={onSelectNode}
+            renderMode={renderMode}
             selected={selectedNodeIds.includes(mesh.nodeId)}
           />
         )
@@ -68,6 +85,7 @@ function RenderPrimitive({
   onHoverStart,
   onMeshObjectChange,
   onSelectNodes,
+  renderMode,
   selected
 }: {
   hovered: boolean;
@@ -78,32 +96,60 @@ function RenderPrimitive({
   onHoverStart: (nodeId: string) => void;
   onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
   onSelectNodes: (nodeIds: string[]) => void;
+  renderMode: ViewportRenderMode;
   selected: boolean;
 }) {
   const [meshObject, setMeshObject] = useState<Mesh | null>(null);
   const hasRenderableGeometry = Boolean(mesh.surface || mesh.primitive);
   const geometry = useMemo(() => {
-    if (!mesh.surface) {
+    let bufferGeometry: BufferGeometry | undefined;
+
+    if (mesh.surface) {
+      bufferGeometry = createIndexedGeometry(
+        mesh.surface.positions,
+        mesh.surface.indices,
+        mesh.surface.uvs,
+        mesh.surface.groups
+      );
+    } else if (mesh.primitive?.kind === "box") {
+      bufferGeometry = new BoxGeometry(...toTuple(mesh.primitive.size));
+    } else if (mesh.primitive?.kind === "icosahedron") {
+      bufferGeometry = new IcosahedronGeometry(mesh.primitive.radius, mesh.primitive.detail);
+    } else if (mesh.primitive?.kind === "cylinder") {
+      bufferGeometry = new CylinderGeometry(
+        mesh.primitive.radiusTop,
+        mesh.primitive.radiusBottom,
+        mesh.primitive.height,
+        mesh.primitive.radialSegments
+      );
+    }
+
+    if (!bufferGeometry) {
       return undefined;
     }
 
-    const bufferGeometry = createIndexedGeometry(
-      mesh.surface.positions,
-      mesh.surface.indices,
-      mesh.surface.uvs,
-      mesh.surface.groups
-    );
     bufferGeometry.computeVertexNormals();
     bufferGeometry.computeBoundingBox();
     bufferGeometry.computeBoundingSphere();
 
     return bufferGeometry;
-  }, [mesh.surface]);
+  }, [mesh.primitive, mesh.surface]);
+  const edgeGeometry = useMemo(() => {
+    if (!geometry || renderMode !== "wireframe") {
+      return undefined;
+    }
+
+    return new EdgesGeometry(geometry, 1);
+  }, [geometry, renderMode]);
   const previewMaterials = useMemo(() => {
+    if (renderMode !== "lit") {
+      return [];
+    }
+
     const specs = mesh.materials ?? [mesh.material];
 
     return specs.map((spec) => createPreviewMaterial(spec, selected, hovered));
-  }, [hovered, mesh.material, mesh.materials, selected]);
+  }, [hovered, mesh.material, mesh.materials, renderMode, selected]);
 
   useEffect(() => {
     if (geometry && meshObject && mesh.bvhEnabled) {
@@ -118,7 +164,7 @@ function RenderPrimitive({
   }, [geometry, mesh.bvhEnabled, meshObject]);
 
   useEffect(() => {
-    if (meshObject) {
+    if (meshObject && previewMaterials.length > 0) {
       meshObject.material = previewMaterials.length === 1 ? previewMaterials[0] : previewMaterials;
     }
   }, [meshObject, previewMaterials]);
@@ -128,6 +174,13 @@ function RenderPrimitive({
       previewMaterials.forEach((material) => disposePreviewMaterial(material));
     };
   }, [previewMaterials]);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+      edgeGeometry?.dispose();
+    };
+  }, [edgeGeometry, geometry]);
 
   if (!hasRenderableGeometry) {
     return null;
@@ -148,13 +201,23 @@ function RenderPrimitive({
     >
       <group position={[-pivot.x, -pivot.y, -pivot.z]}>
         <mesh
-          castShadow
+          castShadow={renderMode === "lit"}
           onClick={(event) => {
             if (!interactive) {
               return;
             }
 
             event.stopPropagation();
+
+            if (renderMode === "wireframe") {
+              const nodeIds = resolveIntersectedNodeIds(event.intersections);
+
+              if (nodeIds.length > 0) {
+                onSelectNodes(nodeIds);
+                return;
+              }
+            }
+
             onSelectNodes([mesh.nodeId]);
           }}
           onDoubleClick={(event) => {
@@ -185,27 +248,59 @@ function RenderPrimitive({
             setMeshObject(object);
             onMeshObjectChange(mesh.nodeId, object);
           }}
-          receiveShadow
+          receiveShadow={renderMode === "lit"}
         >
           {geometry ? <primitive attach="geometry" object={geometry} /> : null}
-          {mesh.primitive?.kind === "box" ? <boxGeometry args={toTuple(mesh.primitive.size)} /> : null}
-          {mesh.primitive?.kind === "icosahedron" ? (
-            <icosahedronGeometry args={[mesh.primitive.radius, mesh.primitive.detail]} />
-          ) : null}
-          {mesh.primitive?.kind === "cylinder" ? (
-            <cylinderGeometry
-              args={[
-                mesh.primitive.radiusTop,
-                mesh.primitive.radiusBottom,
-                mesh.primitive.height,
-                mesh.primitive.radialSegments
-              ]}
-            />
+          {renderMode === "wireframe" ? (
+            <meshBasicMaterial color={selected ? "#fb923c" : hovered ? "#7dd3fc" : "#cbd5e1"} opacity={0.001} transparent />
           ) : null}
         </mesh>
+        {renderMode === "wireframe" && edgeGeometry ? (
+          <lineSegments geometry={edgeGeometry} renderOrder={6}>
+            <lineBasicMaterial
+              color={selected ? "#f97316" : hovered ? "#67e8f9" : "#94a3b8"}
+              depthWrite={false}
+              opacity={selected ? 0.95 : 0.76}
+              toneMapped={false}
+              transparent
+            />
+          </lineSegments>
+        ) : null}
       </group>
     </group>
   );
+}
+
+function resolveIntersectedNodeIds(intersections: Array<{ object: Object3D }>) {
+  const nodeIds: string[] = [];
+  const seen = new Set<string>();
+
+  intersections.forEach((intersection) => {
+    const nodeId = resolveNodeIdFromObject(intersection.object);
+
+    if (!nodeId || seen.has(nodeId)) {
+      return;
+    }
+
+    seen.add(nodeId);
+    nodeIds.push(nodeId);
+  });
+
+  return nodeIds;
+}
+
+function resolveNodeIdFromObject(object: Object3D | null) {
+  let current: Object3D | null = object;
+
+  while (current) {
+    if (current.name.startsWith("node:")) {
+      return current.name.slice(5);
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
 }
 
 function createPreviewMaterial(spec: DerivedRenderMesh["material"], selected: boolean, hovered: boolean) {

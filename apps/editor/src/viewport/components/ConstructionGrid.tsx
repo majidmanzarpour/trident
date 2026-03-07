@@ -1,4 +1,4 @@
-import { snapVec3, toTuple, vec3 } from "@web-hammer/shared";
+import { snapValue, vec3 } from "@web-hammer/shared";
 import { useMemo } from "react";
 import type { ViewportCanvasProps } from "@/viewport/types";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
@@ -7,8 +7,9 @@ import { resolveViewportSnapSize } from "@/viewport/utils/snap";
 export function ConstructionGrid({
   activeToolId,
   onPlaceAsset,
+  viewportPlane,
   viewport
-}: Pick<ViewportCanvasProps, "activeToolId" | "onPlaceAsset" | "viewport">) {
+}: Pick<ViewportCanvasProps, "activeToolId" | "onPlaceAsset" | "viewport" | "viewportPlane">) {
   if (!viewport.grid.visible) {
     return null;
   }
@@ -17,9 +18,10 @@ export function ConstructionGrid({
   const minorStep = viewport.grid.snapSize;
   const majorStep = minorStep * viewport.grid.majorLineEvery;
   const extent = viewport.grid.size;
+  const transform = resolveConstructionPlaneTransform(viewportPlane, viewport);
 
   return (
-    <group position={[0, viewport.grid.elevation, 0]}>
+    <group position={transform.position} rotation={transform.rotation}>
       <mesh
         onClick={(event) => {
           if (activeToolId !== "asset-place") {
@@ -27,10 +29,7 @@ export function ConstructionGrid({
           }
 
           event.stopPropagation();
-          const snapped = snapVec3(
-            vec3(event.point.x, viewport.grid.elevation, event.point.z),
-            snapSize
-          );
+          const snapped = snapPointToConstructionPlane(event.point, viewportPlane, viewport, snapSize);
           onPlaceAsset(snapped);
         }}
         receiveShadow
@@ -44,6 +43,47 @@ export function ConstructionGrid({
       <GridLines color="#7f8b99" opacity={0.86} size={extent} step={majorStep} y={0.006} />
     </group>
   );
+}
+
+function resolveConstructionPlaneTransform(
+  plane: ViewportCanvasProps["viewportPlane"],
+  viewport: ViewportCanvasProps["viewport"]
+) {
+  switch (plane) {
+    case "xy":
+      return {
+        position: [0, 0, viewport.camera.target.z] as [number, number, number],
+        rotation: [Math.PI / 2, 0, 0] as [number, number, number]
+      };
+    case "yz":
+      return {
+        position: [viewport.camera.target.x, 0, 0] as [number, number, number],
+        rotation: [0, 0, Math.PI / 2] as [number, number, number]
+      };
+    case "xz":
+    default:
+      return {
+        position: [0, viewport.grid.elevation, 0] as [number, number, number],
+        rotation: [0, 0, 0] as [number, number, number]
+      };
+  }
+}
+
+function snapPointToConstructionPlane(
+  point: { x: number; y: number; z: number },
+  plane: ViewportCanvasProps["viewportPlane"],
+  viewport: ViewportCanvasProps["viewport"],
+  snapSize: number
+) {
+  switch (plane) {
+    case "xy":
+      return vec3(snapValue(point.x, snapSize), snapValue(point.y, snapSize), viewport.camera.target.z);
+    case "yz":
+      return vec3(viewport.camera.target.x, snapValue(point.y, snapSize), snapValue(point.z, snapSize));
+    case "xz":
+    default:
+      return vec3(snapValue(point.x, snapSize), viewport.grid.elevation, snapValue(point.z, snapSize));
+  }
 }
 
 function GridLines({

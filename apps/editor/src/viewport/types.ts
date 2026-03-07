@@ -3,6 +3,7 @@ import type { DerivedRenderScene, ViewportState } from "@web-hammer/render-pipel
 import type { Brush, EditableMesh, GeometryNode, Transform, Vec3 } from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
 import type { BrushExtrudeHandle, MeshEditMode, MeshExtrudeHandle } from "@/viewport/editing";
+import type { ConstructionPlane, ViewportPaneId, ViewportRenderMode } from "@/viewport/viewports";
 import type { Plane, Vector2 } from "three";
 
 export type MeshEditToolbarAction =
@@ -24,6 +25,7 @@ export type ViewportCanvasProps = {
   activeToolId: ToolId;
   meshEditMode: MeshEditMode;
   meshEditToolbarAction?: MeshEditToolbarActionRequest;
+  onActivateViewport: (viewportId: ViewportPaneId) => void;
   onClearSelection: () => void;
   onCommitMeshTopology: (nodeId: string, mesh: EditableMesh) => void;
   onFocusNode: (nodeId: string) => void;
@@ -38,11 +40,15 @@ export type ViewportCanvasProps = {
   onUpdateBrushData: (nodeId: string, brush: Brush, beforeBrush?: Brush) => void;
   onUpdateMeshData: (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => void;
   onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
+  onViewportChange: (viewportId: ViewportPaneId, viewport: ViewportState) => void;
   renderScene: DerivedRenderScene;
+  renderMode: ViewportRenderMode;
   selectedNode?: GeometryNode;
   selectedNodeIds: string[];
   selectedNodes: GeometryNode[];
   transformMode: "rotate" | "scale" | "translate";
+  viewportId: ViewportPaneId;
+  viewportPlane: ConstructionPlane;
   viewport: ViewportState;
 };
 

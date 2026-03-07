@@ -27,9 +27,8 @@ import {
   type TransformAxis
 } from "@web-hammer/editor-core";
 import { convertBrushToEditableMesh, invertEditableMeshNormals } from "@web-hammer/geometry-kernel";
-import { deriveRenderScene, gridSnapValues } from "@web-hammer/render-pipeline";
+import { deriveRenderScene, gridSnapValues, type ViewportState } from "@web-hammer/render-pipeline";
 import {
-  addVec3,
   type GeometryNode,
   isBrushNode,
   isMeshNode,
@@ -37,7 +36,6 @@ import {
   type Material,
   type MeshNode,
   snapVec3,
-  subVec3,
   vec2,
   vec3,
   type Brush,
@@ -59,6 +57,12 @@ import { useEditorSubscriptions } from "@/app/hooks/useEditorSubscriptions";
 import { useExportWorker } from "@/app/hooks/useExportWorker";
 import { clampSnapSize, resolveViewportSnapSize } from "@/viewport/utils/snap";
 import type { MeshEditToolbarActionRequest } from "@/viewport/types";
+import {
+  focusViewportOnPoint,
+  viewportPaneIds,
+  type ViewModeId,
+  type ViewportPaneId
+} from "@/viewport/viewports";
 
 export function App() {
   const [editor] = useState(() => createEditorCore(createSeedSceneDocument()));
@@ -93,8 +97,20 @@ export function App() {
     setActiveToolId(toolId);
   };
 
-  const handleSetRightPanel = (panel: "inspector" | "materials") => {
+  const handleSetRightPanel = (panel: "inspector" | "materials" | "scene") => {
     uiStore.rightPanel = panel;
+  };
+
+  const handleActivateViewport = (viewportId: ViewportPaneId) => {
+    uiStore.activeViewportId = viewportId;
+  };
+
+  const handleSetViewMode = (viewMode: ViewModeId) => {
+    uiStore.viewMode = viewMode;
+  };
+
+  const handleUpdateViewport = (viewportId: ViewportPaneId, viewport: ViewportState) => {
+    uiStore.viewports[viewportId] = viewport;
   };
 
   const handleClearSelection = () => {
@@ -108,24 +124,23 @@ export function App() {
       return;
     }
 
-    const currentTarget = uiStore.viewport.camera.target;
-    const currentPosition = uiStore.viewport.camera.position;
-    const orbitOffset = subVec3(currentPosition, currentTarget);
-
-    uiStore.viewport.camera.target = vec3(
-      node.transform.position.x,
-      node.transform.position.y,
-      node.transform.position.z
-    );
-    uiStore.viewport.camera.position = addVec3(node.transform.position, orbitOffset);
+    viewportPaneIds.forEach((viewportId) => {
+      focusViewportOnPoint(uiStore.viewports[viewportId], node.transform.position);
+    });
   };
 
   const handleSetSnapSize = (snapSize: number) => {
-    uiStore.viewport.grid.snapSize = clampSnapSize(snapSize);
+    const nextSnapSize = clampSnapSize(snapSize);
+
+    viewportPaneIds.forEach((viewportId) => {
+      uiStore.viewports[viewportId].grid.snapSize = nextSnapSize;
+    });
   };
 
   const handleSetSnapEnabled = (enabled: boolean) => {
-    uiStore.viewport.grid.enabled = enabled;
+    viewportPaneIds.forEach((viewportId) => {
+      uiStore.viewports[viewportId].grid.enabled = enabled;
+    });
   };
 
   const handleMeshEditToolbarAction = (kind: MeshEditToolbarActionRequest["kind"]) => {
@@ -224,12 +239,14 @@ export function App() {
     workerManager.enqueue(task, label, durationMs);
   };
 
+  const resolveActiveViewportState = () => uiStore.viewports[uiStore.activeViewportId];
+
   const handleTranslateSelection = (axis: TransformAxis, direction: -1 | 1) => {
     if (editor.selection.ids.length === 0) {
       return;
     }
 
-    const delta = axisDelta(axis, resolveViewportSnapSize(uiStore.viewport) * direction);
+    const delta = axisDelta(axis, resolveViewportSnapSize(resolveActiveViewportState()) * direction);
     editor.execute(createTranslateNodesCommand(editor.selection.ids, delta));
     enqueueWorkerJob("Geometry rebuild", { task: "brush-rebuild", worker: "geometryWorker" }, 700);
   };
@@ -242,7 +259,7 @@ export function App() {
     const { command, duplicateIds } = createDuplicateNodesCommand(
       editor.scene,
       editor.selection.ids,
-      axisDelta("x", resolveViewportSnapSize(uiStore.viewport))
+      axisDelta("x", resolveViewportSnapSize(resolveActiveViewportState()))
     );
 
     editor.execute(command);
@@ -294,7 +311,7 @@ export function App() {
           editor.scene,
           editor.selection.ids,
           axis,
-          resolveViewportSnapSize(uiStore.viewport),
+          resolveViewportSnapSize(resolveActiveViewportState()),
           direction
         )
       );
@@ -304,7 +321,7 @@ export function App() {
 
     if (selectedNode && isMeshNode(selectedNode) && axis === "y") {
       editor.execute(
-        createMeshRaiseTopCommand(editor.scene, editor.selection.ids, resolveViewportSnapSize(uiStore.viewport) * direction)
+        createMeshRaiseTopCommand(editor.scene, editor.selection.ids, resolveViewportSnapSize(resolveActiveViewportState()) * direction)
       );
       enqueueWorkerJob("Mesh triangulation", { task: "triangulation", worker: "meshWorker" }, 850);
     }
@@ -320,7 +337,7 @@ export function App() {
   };
 
   const handlePlaceAsset = (position: Vec3) => {
-    const snapped = snapVec3(position, resolveViewportSnapSize(uiStore.viewport));
+    const snapped = snapVec3(position, resolveViewportSnapSize(resolveActiveViewportState()));
     const asset = editor.scene.assets.get(uiStore.selectedAssetId);
 
     if (!asset || asset.type !== "model") {
@@ -342,7 +359,8 @@ export function App() {
   };
 
   const handleCreateBrush = () => {
-    const snappedTarget = snapVec3(uiStore.viewport.camera.target, resolveViewportSnapSize(uiStore.viewport));
+    const activeViewportState = resolveActiveViewportState();
+    const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
     const { command, nodeId } = createPlaceBrushNodeCommand(
       editor.scene,
       makeTransform(vec3(snappedTarget.x, 1.5, snappedTarget.z))
@@ -491,10 +509,11 @@ export function App() {
   };
 
   const handlePlaceEntity = (type: "spawn" | "light") => {
+    const activeViewportState = resolveActiveViewportState();
     const position = vec3(
-      uiStore.viewport.camera.target.x,
+      activeViewportState.camera.target.x,
       type === "light" ? 3 : 1,
-      uiStore.viewport.camera.target.z
+      activeViewportState.camera.target.z
     );
     const entityId = `entity:${type}:${editor.scene.entities.size + 1}`;
     editor.execute(
@@ -607,12 +626,14 @@ export function App() {
       <EditorShell
         activeRightPanel={ui.rightPanel}
         activeToolId={toolSession.toolId}
+        activeViewportId={ui.activeViewportId}
         canRedo={editor.commands.canRedo()}
         canUndo={editor.commands.canUndo()}
         editor={editor}
         gridSnapValues={gridSnapValues}
         jobs={[...workerJobs, ...exportJobs]}
         meshEditToolbarAction={meshEditToolbarAction}
+        onActivateViewport={handleActivateViewport}
         onInvertSelectionNormals={handleInvertSelectionNormals}
         onApplyMaterial={handleApplyMaterial}
         onClipSelection={handleClipSelection}
@@ -649,9 +670,11 @@ export function App() {
         onSetSnapSize={handleSetSnapSize}
         onSetTransformMode={setTransformMode}
         onSetToolId={handleSetToolId}
+        onSetViewMode={handleSetViewMode}
         onSplitBrushAtCoordinate={handleSplitBrushAtCoordinate}
         onTranslateSelection={handleTranslateSelection}
         onUndo={handleUndo}
+        onUpdateViewport={handleUpdateViewport}
         onUpsertMaterial={handleUpsertMaterial}
         onUpdateBrushData={handleUpdateBrushData}
         onUpdateMeshData={handleUpdateMeshData}
@@ -661,10 +684,10 @@ export function App() {
         selectedAssetId={ui.selectedAssetId}
         selectedFaceIds={selectedMaterialFaceIds}
         selectedMaterialId={ui.selectedMaterialId}
-        snapEnabled={ui.viewport.grid.enabled}
         transformMode={transformMode}
-        viewport={ui.viewport}
         tools={defaultTools}
+        viewMode={ui.viewMode}
+        viewports={ui.viewports}
       />
       <input
         accept=".whmap,.json"

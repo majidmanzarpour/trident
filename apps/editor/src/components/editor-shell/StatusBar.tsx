@@ -3,22 +3,27 @@ import type { GeometryNode } from "@web-hammer/shared";
 import type { WorkerJob } from "@web-hammer/workers";
 import { JobStatus } from "@/components/editor-shell/JobStatus";
 import type { MeshEditMode } from "@/viewport/editing";
+import type { ViewportPaneId } from "@/viewport/viewports";
 
 type StatusBarProps = {
   activeToolLabel: string;
+  activeViewportId: ViewportPaneId;
   gridSnapValues: readonly GridSnapValue[];
   jobs: WorkerJob[];
   meshEditMode: MeshEditMode;
   selectedNode?: GeometryNode;
+  viewModeLabel: string;
   viewport: ViewportState;
 };
 
 export function StatusBar({
   activeToolLabel,
+  activeViewportId,
   gridSnapValues,
   jobs,
   meshEditMode,
   selectedNode,
+  viewModeLabel,
   viewport
 }: StatusBarProps) {
   const snapText = viewport.grid.enabled ? `snap ${viewport.grid.snapSize}` : `snap off (${viewport.grid.snapSize})`;
@@ -46,6 +51,10 @@ export function StatusBar({
         ) : null}
         <span className="text-foreground/25">/</span>
         <span>{viewport.projection} camera</span>
+        <span className="text-foreground/25">/</span>
+        <span>{activeViewportId} pane</span>
+        <span className="text-foreground/25">/</span>
+        <span>{viewModeLabel.toLowerCase()}</span>
         <span className="text-foreground/25">/</span>
         <span>{snapText}</span>
         <span className="text-foreground/25">/</span>

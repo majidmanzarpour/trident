@@ -1,5 +1,5 @@
 import { resolveTransformPivot, type GeometryNode, type Vec3 } from "@web-hammer/shared";
-import { Box3, Euler, Mesh, type PerspectiveCamera, Vector2, Vector3 } from "three";
+import { Box3, Camera, Euler, Mesh, Vector2, Vector3 } from "three";
 
 export type ScreenRect = {
   height: number;
@@ -22,7 +22,7 @@ export function createScreenRect(origin: Vector2, current: Vector2): ScreenRect 
 
 export function intersectsSelectionRect(
   object: Mesh,
-  camera: PerspectiveCamera,
+  camera: Camera,
   viewportBounds: DOMRect,
   selectionRect: ScreenRect
 ): boolean {
@@ -48,7 +48,7 @@ export function rectContainsPoint(rect: ScreenRect, point: { x: number; y: numbe
 export function projectLocalPointToScreen(
   point: Vec3,
   node: GeometryNode,
-  camera: PerspectiveCamera,
+  camera: Camera,
   viewportBounds: DOMRect
 ) {
   const pivot = resolveTransformPivot(node.transform);
@@ -65,7 +65,7 @@ export function projectLocalPointToScreen(
   };
 }
 
-function projectBoxToScreenRect(box: Box3, camera: PerspectiveCamera, viewportBounds: DOMRect): ScreenRect {
+function projectBoxToScreenRect(box: Box3, camera: Camera, viewportBounds: DOMRect): ScreenRect {
   const min = box.min;
   const max = box.max;
   const corners = [

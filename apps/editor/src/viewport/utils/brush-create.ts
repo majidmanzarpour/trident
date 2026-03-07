@@ -13,6 +13,7 @@ import {
 } from "@web-hammer/shared";
 import type { BrushCreateBasis, BrushCreateState } from "@/viewport/types";
 import {
+  Camera,
   Euler,
   Matrix4,
   Mesh,
@@ -20,21 +21,19 @@ import {
   Quaternion,
   Raycaster,
   Vector2,
-  Vector3,
-  type PerspectiveCamera
+  Vector3
 } from "three";
 
 export function resolveBrushCreateSurfaceHit(
   clientX: number,
   clientY: number,
   viewportBounds: DOMRect,
-  camera: PerspectiveCamera,
+  camera: Camera,
   raycaster: Raycaster,
   meshObjects: Map<string, Mesh>,
-  gridElevation: number,
-  snapToGrid: boolean,
-  snapSize: number
-): { normal: Vec3; point: Vec3 } | undefined {
+  fallbackPlanePoint: Vec3,
+  fallbackPlaneNormal: Vec3
+): { kind: "plane" | "surface"; normal: Vec3; point: Vec3 } | undefined {
   const ndc = new Vector2(
     ((clientX - viewportBounds.left) / viewportBounds.width) * 2 - 1,
     -(((clientY - viewportBounds.top) / viewportBounds.height) * 2 - 1)
@@ -49,24 +48,28 @@ export function resolveBrushCreateSurfaceHit(
       : new Vector3(0, 1, 0);
 
     return {
+      kind: "surface",
       normal: vec3(worldNormal.x, worldNormal.y, worldNormal.z),
       point: vec3(hit.point.x, hit.point.y, hit.point.z)
     };
   }
 
-  const point = raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -gridElevation), new Vector3());
+  const point = raycaster.ray.intersectPlane(
+    new Plane().setFromNormalAndCoplanarPoint(
+      new Vector3(fallbackPlaneNormal.x, fallbackPlaneNormal.y, fallbackPlaneNormal.z),
+      new Vector3(fallbackPlanePoint.x, fallbackPlanePoint.y, fallbackPlanePoint.z)
+    ),
+    new Vector3()
+  );
 
   if (!point) {
     return undefined;
   }
 
-  const anchorPoint = snapToGrid
-    ? vec3(snapValue(point.x, snapSize), point.y, snapValue(point.z, snapSize))
-    : vec3(point.x, point.y, point.z);
-
   return {
-    normal: vec3(0, 1, 0),
-    point: anchorPoint
+    kind: "plane",
+    normal: vec3(fallbackPlaneNormal.x, fallbackPlaneNormal.y, fallbackPlaneNormal.z),
+    point: vec3(point.x, point.y, point.z)
   };
 }
 
@@ -87,7 +90,7 @@ export function projectPointerToPlane(
   clientX: number,
   clientY: number,
   viewportBounds: DOMRect,
-  camera: PerspectiveCamera,
+  camera: Camera,
   raycaster: Raycaster,
   anchor: Vec3,
   normal: Vec3
@@ -105,7 +108,7 @@ export function projectPointerToThreePlane(
   clientX: number,
   clientY: number,
   viewportBounds: DOMRect,
-  camera: PerspectiveCamera,
+  camera: Camera,
   raycaster: Raycaster,
   plane: Plane
 ) {
@@ -134,7 +137,7 @@ export function computeBrushCreateCenter(anchor: Vec3, basis: BrushCreateBasis, 
   );
 }
 
-export function createBrushCreateDragPlane(camera: PerspectiveCamera, normal: Vec3, coplanarPoint: Vec3) {
+export function createBrushCreateDragPlane(camera: Camera, normal: Vec3, coplanarPoint: Vec3) {
   const axis = new Vector3(normal.x, normal.y, normal.z).normalize();
   const cameraDirection = camera.getWorldDirection(new Vector3());
   let tangent = new Vector3().crossVectors(cameraDirection, axis);
@@ -205,7 +208,7 @@ export function buildBrushCreatePreviewPositions(state: BrushCreateState, snapSi
 export function projectLocalPointToScreen(
   point: Vec3,
   node: GeometryNode,
-  camera: PerspectiveCamera,
+  camera: Camera,
   viewportBounds: DOMRect
 ) {
   const pivot = resolveTransformPivot(node.transform);

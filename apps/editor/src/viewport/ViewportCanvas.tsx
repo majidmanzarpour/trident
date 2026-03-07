@@ -76,7 +76,7 @@ import {
 import { composeTransformRotation, rebaseTransformPivot } from "@/viewport/utils/geometry";
 import { resolveViewportSnapSize } from "@/viewport/utils/snap";
 import { useEffect, useRef, useState, type PointerEventHandler } from "react";
-import { Mesh, Plane, Raycaster, Vector2, Vector3, type PerspectiveCamera } from "three";
+import { Camera, Mesh, Plane, Raycaster, Vector2, Vector3 } from "three";
 import type {
   BevelState,
   BrushCreateState,
@@ -92,6 +92,7 @@ export function ViewportCanvas({
   activeToolId,
   meshEditMode,
   meshEditToolbarAction,
+  onActivateViewport,
   onClearSelection,
   onCommitMeshTopology,
   onFocusNode,
@@ -106,14 +107,18 @@ export function ViewportCanvas({
   onUpdateBrushData,
   onUpdateMeshData,
   onUpdateNodeTransform,
+  onViewportChange,
+  renderMode,
   renderScene,
   selectedNode,
   selectedNodeIds,
   selectedNodes,
   transformMode,
+  viewportId,
+  viewportPlane,
   viewport
 }: ViewportCanvasProps) {
-  const cameraRef = useRef<PerspectiveCamera | null>(null);
+  const cameraRef = useRef<Camera | null>(null);
   const brushClickOriginRef = useRef<Vector2 | null>(null);
   const marqueeOriginRef = useRef<Vector2 | null>(null);
   const pointerPositionRef = useRef<Vector2 | null>(null);
@@ -1350,6 +1355,7 @@ export function ViewportCanvas({
     }
 
     if (!brushCreateState) {
+      const constructionPlane = resolveViewportConstructionPlane(viewportPlane, viewport);
       const hit = resolveBrushCreateSurfaceHit(
         clientX,
         clientY,
@@ -1357,19 +1363,23 @@ export function ViewportCanvas({
         cameraRef.current,
         raycasterRef.current,
         meshObjectsRef.current,
-        viewport.grid.elevation,
-        viewport.grid.enabled,
-        snapSize
+        constructionPlane.point,
+        constructionPlane.normal
       );
 
       if (!hit) {
         return;
       }
 
+      const anchorPoint =
+        hit.kind === "plane" && viewport.grid.enabled
+          ? snapPointToViewportPlane(hit.point, viewportPlane, viewport, snapSize)
+          : hit.point;
+
       setBrushCreateState({
-        anchor: hit.point,
+        anchor: anchorPoint,
         basis: createBrushCreateBasis(hit.normal),
-        currentPoint: hit.point,
+        currentPoint: anchorPoint,
         stage: "base"
       });
       return;
@@ -1439,6 +1449,7 @@ export function ViewportCanvas({
   };
 
   const handlePointerDown: PointerEventHandler<HTMLDivElement> = (event) => {
+    onActivateViewport(viewportId);
     const bounds = event.currentTarget.getBoundingClientRect();
     pointerPositionRef.current = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
 
@@ -1612,6 +1623,20 @@ export function ViewportCanvas({
   };
 
   const marqueeRect = marquee ? createScreenRect(marquee.origin, marquee.current) : undefined;
+  const canvasCamera =
+    viewport.projection === "orthographic"
+      ? {
+          far: viewport.camera.far,
+          near: viewport.camera.near,
+          position: toTuple(viewport.camera.position),
+          zoom: viewport.camera.zoom
+        }
+      : {
+          far: viewport.camera.far,
+          fov: viewport.camera.fov,
+          near: viewport.camera.near,
+          position: toTuple(viewport.camera.position)
+        };
 
   return (
     <div
@@ -1622,19 +1647,15 @@ export function ViewportCanvas({
       onPointerUp={handlePointerUp}
     >
       <Canvas
-        camera={{
-          far: viewport.camera.far,
-          fov: viewport.camera.fov,
-          near: viewport.camera.near,
-          position: toTuple(viewport.camera.position)
-        }}
+        camera={canvasCamera}
         gl={async (props) => {
           const renderer = new WebGPURenderer(props as ConstructorParameters<typeof WebGPURenderer>[0]);
           await renderer.init();
           return renderer;
         }}
+        orthographic={viewport.projection === "orthographic"}
         onCreated={(state: RootState) => {
-          cameraRef.current = state.camera as PerspectiveCamera;
+          cameraRef.current = state.camera;
         }}
         onPointerMissed={() => {
           if (
@@ -1657,21 +1678,23 @@ export function ViewportCanvas({
 
           onClearSelection();
         }}
-        shadows
+        shadows={renderMode === "lit"}
       >
-        <color attach="background" args={["#0b1118"]} />
-        <fog attach="fog" args={["#0b1118", 45, 180]} />
-        <ambientLight intensity={0.45} />
-        <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} />
-        <directionalLight
-          castShadow
-          intensity={1.4}
-          position={[18, 26, 12]}
-          shadow-bias={-0.0002}
-          shadow-mapSize-height={2048}
-          shadow-mapSize-width={2048}
-          shadow-normalBias={0.045}
-        />
+        <color attach="background" args={[renderMode === "lit" ? "#0b1118" : "#091018"]} />
+        {renderMode === "lit" ? <fog attach="fog" args={["#0b1118", 45, 180]} /> : null}
+        {renderMode === "lit" ? <ambientLight intensity={0.45} /> : null}
+        {renderMode === "lit" ? <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} /> : null}
+        {renderMode === "lit" ? (
+          <directionalLight
+            castShadow
+            intensity={1.4}
+            position={[18, 26, 12]}
+            shadow-bias={-0.0002}
+            shadow-mapSize-height={2048}
+            shadow-mapSize-width={2048}
+            shadow-normalBias={0.045}
+          />
+        ) : null}
         <EditorCameraRig
           controlsEnabled={
             !marquee &&
@@ -1682,10 +1705,12 @@ export function ViewportCanvas({
             !faceCutState &&
             !faceSubdivisionState
           }
+          onViewportChange={onViewportChange}
+          viewportId={viewportId}
           viewport={viewport}
         />
-        <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} />
-        <axesHelper args={[3]} />
+        <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} viewportPlane={viewportPlane} />
+        {renderMode === "lit" ? <axesHelper args={[3]} /> : null}
         <ScenePreview
           hiddenNodeIds={
             selectedNode &&
@@ -1697,6 +1722,7 @@ export function ViewportCanvas({
           onFocusNode={onFocusNode}
           onMeshObjectChange={handleMeshObjectChange}
           onSelectNode={onSelectNodes}
+          renderMode={renderMode}
           renderScene={renderScene}
           selectedNodeIds={selectedNodeIds}
         />
@@ -1824,6 +1850,47 @@ export function ViewportCanvas({
 
 function emptyEditableMesh(): EditableMesh {
   return { faces: [], halfEdges: [], vertices: [] };
+}
+
+function resolveViewportConstructionPlane(
+  viewportPlane: ViewportCanvasProps["viewportPlane"],
+  viewport: ViewportCanvasProps["viewport"]
+) {
+  switch (viewportPlane) {
+    case "xy":
+      return {
+        normal: vec3(0, 0, 1),
+        point: vec3(0, 0, viewport.camera.target.z)
+      };
+    case "yz":
+      return {
+        normal: vec3(1, 0, 0),
+        point: vec3(viewport.camera.target.x, 0, 0)
+      };
+    case "xz":
+    default:
+      return {
+        normal: vec3(0, 1, 0),
+        point: vec3(0, viewport.grid.elevation, 0)
+      };
+  }
+}
+
+function snapPointToViewportPlane(
+  point: Vec3,
+  viewportPlane: ViewportCanvasProps["viewportPlane"],
+  viewport: ViewportCanvasProps["viewport"],
+  snapSize: number
+) {
+  switch (viewportPlane) {
+    case "xy":
+      return vec3(snapValue(point.x, snapSize), snapValue(point.y, snapSize), viewport.camera.target.z);
+    case "yz":
+      return vec3(viewport.camera.target.x, snapValue(point.y, snapSize), snapValue(point.z, snapSize));
+    case "xz":
+    default:
+      return vec3(snapValue(point.x, snapSize), viewport.grid.elevation, snapValue(point.z, snapSize));
+  }
 }
 
 function resolveExtrudeAnchor(

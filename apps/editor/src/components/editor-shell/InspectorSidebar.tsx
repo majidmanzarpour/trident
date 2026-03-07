@@ -6,27 +6,31 @@ import { DragInput } from "@/components/ui/drag-input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FloatingPanel } from "@/components/editor-shell/FloatingPanel";
 import { MaterialLibraryPanel } from "@/components/editor-shell/MaterialLibraryPanel";
+import { SceneHierarchyPanel } from "@/components/editor-shell/SceneHierarchyPanel";
 import { rebaseTransformPivot } from "@/viewport/utils/geometry";
 import { cn } from "@/lib/utils";
 import type { MeshEditMode } from "@/viewport/editing";
 
 type InspectorSidebarProps = {
-  activeRightPanel: "inspector" | "materials";
+  activeRightPanel: "inspector" | "materials" | "scene";
   activeToolId: ToolId;
   assets: Asset[];
   materials: Material[];
   meshEditMode: MeshEditMode;
+  nodes: GeometryNode[];
   onApplyMaterial: (materialId: string, scope: "faces" | "object", faceIds: string[]) => void;
-  onChangeRightPanel: (panel: "inspector" | "materials") => void;
+  onChangeRightPanel: (panel: "inspector" | "materials" | "scene") => void;
   onClipSelection: (axis: "x" | "y" | "z") => void;
   onDeleteMaterial: (materialId: string) => void;
   onExtrudeSelection: (axis: "x" | "y" | "z", direction: -1 | 1) => void;
+  onFocusNode: (nodeId: string) => void;
   onMeshInflate: (factor: number) => void;
   onMirrorSelection: (axis: "x" | "y" | "z") => void;
   onPlaceAsset: (position: Vec3) => void;
   onPlaceEntity: (type: "spawn" | "light") => void;
   onSelectAsset: (assetId: string) => void;
   onSelectMaterial: (materialId: string) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
   onSetUvScale: (scope: "faces" | "object", faceIds: string[], uvScale: { x: number; y: number }) => void;
   onTranslateSelection: (axis: "x" | "y" | "z", direction: -1 | 1) => void;
   onUpsertMaterial: (material: Material) => void;
@@ -35,6 +39,7 @@ type InspectorSidebarProps = {
   selectedFaceIds: string[];
   selectedMaterialId: string;
   selectedNode?: GeometryNode;
+  selectedNodeId?: string;
   viewportTarget: Vec3;
 };
 
@@ -46,17 +51,20 @@ export function InspectorSidebar({
   assets,
   materials,
   meshEditMode,
+  nodes,
   onApplyMaterial,
   onChangeRightPanel,
   onClipSelection,
   onDeleteMaterial,
   onExtrudeSelection,
+  onFocusNode,
   onMeshInflate,
   onMirrorSelection,
   onPlaceAsset,
   onPlaceEntity,
   onSelectAsset,
   onSelectMaterial,
+  onSelectNodes,
   onSetUvScale,
   onTranslateSelection,
   onUpsertMaterial,
@@ -65,6 +73,7 @@ export function InspectorSidebar({
   selectedFaceIds,
   selectedMaterialId,
   selectedNode,
+  selectedNodeId,
   viewportTarget
 }: InspectorSidebarProps) {
   const [draftTransform, setDraftTransform] = useState<Transform | undefined>(() =>
@@ -131,15 +140,18 @@ export function InspectorSidebar({
   };
 
   return (
-    <div className="pointer-events-none absolute inset-y-4 right-4 z-20 flex w-80">
+    <div className="pointer-events-none absolute right-4 top-4 z-20 flex h-[clamp(22rem,46vh,34rem)] w-80 max-h-[calc(100%-7rem)]">
       <FloatingPanel className="flex min-h-0 w-full flex-col overflow-hidden">
         <Tabs
           className="flex min-h-0 flex-1 flex-col gap-0"
-          onValueChange={(value) => onChangeRightPanel(value as "inspector" | "materials")}
+          onValueChange={(value) => onChangeRightPanel(value as "inspector" | "materials" | "scene")}
           value={activeRightPanel}
         >
           <div className="px-3 pt-3 pb-2">
-            <TabsList className="grid w-full grid-cols-2 rounded-xl bg-white/5 p-1" variant="default">
+            <TabsList className="grid w-full grid-cols-3 rounded-xl bg-white/5 p-1" variant="default">
+              <TabsTrigger className="rounded-lg text-[11px]" value="scene">
+                Scene
+              </TabsTrigger>
               <TabsTrigger className="rounded-lg text-[11px]" value="inspector">
                 Inspector
               </TabsTrigger>
@@ -148,6 +160,15 @@ export function InspectorSidebar({
               </TabsTrigger>
             </TabsList>
           </div>
+
+          <TabsContent className="min-h-0 px-3 pb-3" value="scene">
+            <SceneHierarchyPanel
+              nodes={nodes}
+              onFocusNode={onFocusNode}
+              onSelectNodes={onSelectNodes}
+              selectedNodeId={selectedNodeId}
+            />
+          </TabsContent>
 
           <TabsContent className="min-h-0 px-3 pb-3" value="inspector">
             <div className="flex h-full min-h-0 flex-col gap-3">
