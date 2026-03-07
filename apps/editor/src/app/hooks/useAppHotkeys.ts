@@ -117,19 +117,19 @@ export function useAppHotkeys({
         return;
       }
 
-      if (event.key.toLowerCase() === "g") {
+      if (!event.shiftKey && event.key.toLowerCase() === "g") {
         event.preventDefault();
         setTransformMode("translate");
         return;
       }
 
-      if (event.key.toLowerCase() === "r") {
+      if (!event.shiftKey && event.key.toLowerCase() === "r") {
         event.preventDefault();
         setTransformMode("rotate");
         return;
       }
 
-      if (event.key.toLowerCase() === "s") {
+      if (!event.shiftKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
         setTransformMode("scale");
         return;

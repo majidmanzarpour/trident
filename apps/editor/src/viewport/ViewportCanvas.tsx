@@ -23,8 +23,12 @@ import {
   type EditableMesh
 } from "@web-hammer/shared";
 import {
+  applyBrushEditTransform,
+  applyMeshEditTransform,
   createBrushEditHandles,
   createBrushExtrudeHandles,
+  computeBrushEditSelectionCenter,
+  computeMeshEditSelectionCenter,
   createMeshEditHandles,
   createMeshExtrudeHandles,
   extrudeBrushHandle
@@ -36,6 +40,7 @@ import { EditableMeshPreviewOverlay } from "@/viewport/components/EditableMeshPr
 import { BrushEditOverlay, MeshEditOverlay } from "@/viewport/components/EditOverlays";
 import { EditorCameraRig } from "@/viewport/components/EditorCameraRig";
 import { BrushExtrudeOverlay, ExtrudeAxisGuide, MeshExtrudeOverlay } from "@/viewport/components/ExtrudeOverlays";
+import { MeshCutOverlay } from "@/viewport/components/MeshCutOverlay";
 import { ObjectTransformGizmo } from "@/viewport/components/ObjectTransformGizmo";
 import { ScenePreview } from "@/viewport/components/ScenePreview";
 import {
@@ -61,12 +66,14 @@ import {
   projectLocalPointToScreen,
   rectContainsPoint
 } from "@/viewport/utils/screen-space";
+import { rebaseTransformPivot } from "@/viewport/utils/geometry";
 import { useEffect, useRef, useState, type PointerEventHandler } from "react";
 import { Mesh, Raycaster, Vector2, Vector3, type PerspectiveCamera } from "three";
 import type {
   BevelState,
   BrushCreateState,
   ExtrudeGestureState,
+  LastMeshEditAction,
   MarqueeState,
   ViewportCanvasProps
 } from "@/viewport/types";
@@ -104,28 +111,28 @@ export function ViewportCanvas({
   const [brushCreateState, setBrushCreateState] = useState<BrushCreateState | null>(null);
   const [bevelState, setBevelState] = useState<BevelState | null>(null);
   const [extrudeState, setExtrudeState] = useState<ExtrudeGestureState | null>(null);
+  const [faceCutState, setFaceCutState] = useState<{ faceId: string } | null>(null);
   const [meshEditSelectionIds, setMeshEditSelectionIds] = useState<string[]>([]);
   const [transformDragging, setTransformDragging] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const extrudeStateRef = useRef<ExtrudeGestureState | null>(null);
+  const lastMeshEditActionRef = useRef<LastMeshEditAction | null>(null);
   const previewBrushDataRef = useRef(onPreviewBrushData);
-  const previewMeshDataRef = useRef(onPreviewMeshData);
   extrudeStateRef.current = extrudeState;
   previewBrushDataRef.current = onPreviewBrushData;
-  previewMeshDataRef.current = onPreviewMeshData;
 
   useEffect(() => {
     const currentExtrudeState = extrudeStateRef.current;
 
     if (currentExtrudeState?.kind === "brush") {
       previewBrushDataRef.current(currentExtrudeState.nodeId, currentExtrudeState.baseBrush);
-    } else if (currentExtrudeState?.kind === "mesh") {
-      previewMeshDataRef.current(currentExtrudeState.nodeId, currentExtrudeState.baseMesh);
     }
 
+    extrudeStateRef.current = null;
     setMeshEditSelectionIds([]);
     setBrushEditHandleIds([]);
     setBevelState(null);
+    setFaceCutState(null);
     setExtrudeState(null);
     setTransformDragging(false);
   }, [activeToolId, meshEditMode, selectedNode?.id, selectedNode?.kind]);
@@ -212,6 +219,155 @@ export function ViewportCanvas({
   const clearSubobjectSelection = () => {
     setBrushEditHandleIds([]);
     setMeshEditSelectionIds([]);
+  };
+
+  const updateSelectedNodePivot = (nextPivot?: { x: number; y: number; z: number }) => {
+    if (!selectedNode) {
+      return;
+    }
+
+    onUpdateNodeTransform(
+      selectedNode.id,
+      rebaseTransformPivot(selectedNode.transform, nextPivot ? vec3(nextPivot.x, nextPivot.y, nextPivot.z) : undefined),
+      selectedNode.transform
+    );
+  };
+
+  const startFaceCutOperation = () => {
+    if (meshEditMode !== "face" || !editableMeshSource) {
+      return;
+    }
+
+    const selectedFaces = resolveSelectedEditableMeshFaceIds();
+
+    if (selectedFaces.length !== 1) {
+      return;
+    }
+
+    setFaceCutState({
+      faceId: selectedFaces[0]
+    });
+  };
+
+  const repeatLastMeshEditAction = () => {
+    const action = lastMeshEditActionRef.current;
+
+    if (!action || !selectedNode) {
+      return;
+    }
+
+    if (action.kind === "extrude") {
+      if (action.handleKind === "face") {
+        const selectedFaces = resolveSelectedEditableMeshFaceIds();
+
+        if (selectedFaces.length !== 1) {
+          return;
+        }
+
+        if (selectedBrushNode) {
+          const handle = createBrushExtrudeHandles(selectedBrushNode.data).find(
+            (candidate) => candidate.kind === "face" && candidate.id === selectedFaces[0]
+          );
+
+          if (!handle) {
+            return;
+          }
+
+          const nextBrush = extrudeBrushHandle(selectedBrushNode.data, handle, action.amount);
+
+          if (nextBrush) {
+            onUpdateBrushData(selectedBrushNode.id, nextBrush, selectedBrushNode.data);
+          }
+          return;
+        }
+
+        if (selectedMeshNode) {
+          const nextMesh = extrudeEditableMeshFace(selectedMeshNode.data, selectedFaces[0], action.amount);
+
+          if (nextMesh) {
+            onUpdateMeshData(selectedMeshNode.id, nextMesh, selectedMeshNode.data);
+          }
+        }
+        return;
+      }
+
+      const selectedEdges = resolveSelectedEditableMeshEdgePairs();
+
+      if (selectedEdges.length !== 1) {
+        return;
+      }
+
+      const direction = action.direction ?? vec3(0, 0, 0);
+
+      if (selectedMeshNode) {
+        const nextMesh = extrudeEditableMeshEdge(selectedMeshNode.data, selectedEdges[0], action.amount, direction);
+
+        if (nextMesh) {
+          onUpdateMeshData(selectedMeshNode.id, nextMesh, selectedMeshNode.data);
+        }
+      } else if (editableMeshSource) {
+        const nextMesh = extrudeEditableMeshEdge(editableMeshSource, selectedEdges[0], action.amount, direction);
+
+        if (nextMesh) {
+          commitMeshTopology(nextMesh);
+        }
+      }
+      return;
+    }
+
+    if (meshEditMode !== action.mode) {
+      return;
+    }
+
+    const baselinePosition =
+      selectedNode.transform.pivot && (Math.abs(selectedNode.transform.pivot.x) > 0.0001 || Math.abs(selectedNode.transform.pivot.y) > 0.0001 || Math.abs(selectedNode.transform.pivot.z) > 0.0001)
+        ? selectedNode.transform.pivot
+        : selectedMeshNode
+          ? computeMeshEditSelectionCenter(meshEditHandles, meshEditSelectionIds)
+          : selectedBrushNode
+            ? computeBrushEditSelectionCenter(brushEditHandles, brushEditHandleIds)
+            : vec3(0, 0, 0);
+    const baselineTransform = {
+      position: vec3(baselinePosition.x, baselinePosition.y, baselinePosition.z),
+      rotation: vec3(0, 0, 0),
+      scale: vec3(1, 1, 1)
+    };
+    const currentTransform = {
+      position: vec3(
+        baselinePosition.x + action.translation.x,
+        baselinePosition.y + action.translation.y,
+        baselinePosition.z + action.translation.z
+      ),
+      rotation: vec3(action.rotation.x, action.rotation.y, action.rotation.z),
+      scale: vec3(action.scale.x, action.scale.y, action.scale.z)
+    };
+
+    if (selectedMeshNode && meshEditSelectionIds.length > 0) {
+      const nextMesh = applyMeshEditTransform(
+        selectedMeshNode.data,
+        meshEditMode,
+        meshEditSelectionIds,
+        baselineTransform,
+        currentTransform
+      );
+      onUpdateMeshData(selectedMeshNode.id, nextMesh, selectedMeshNode.data);
+      return;
+    }
+
+    if (selectedBrushNode && brushEditHandleIds.length > 0) {
+      const nextBrush = applyBrushEditTransform(
+        selectedBrushNode.data,
+        brushEditHandles,
+        brushEditHandleIds,
+        baselineTransform,
+        currentTransform,
+        viewport.grid.snapSize
+      );
+
+      if (nextBrush) {
+        onUpdateBrushData(selectedBrushNode.id, nextBrush, selectedBrushNode.data);
+      }
+    }
   };
 
   const commitMeshTopology = (mesh: EditableMesh | undefined) => {
@@ -308,6 +464,56 @@ export function ViewportCanvas({
       );
 
       if (!handle?.normal) {
+        return;
+      }
+
+      if (handle.kind === "edge") {
+        const baseMesh = convertBrushToEditableMesh(selectedBrushNode.data);
+
+        if (!baseMesh) {
+          return;
+        }
+
+        const editableEdgePair = findMatchingMeshEdgePair(createMeshEditHandles(baseMesh, "edge"), handle);
+
+        if (!editableEdgePair) {
+          return;
+        }
+
+        const meshHandle = createMeshExtrudeHandles(baseMesh).find(
+          (candidate) =>
+            candidate.kind === "edge" &&
+            makeUndirectedPairKey(candidate.vertexIds as [string, string]) === makeUndirectedPairKey(editableEdgePair)
+        );
+
+        if (!meshHandle) {
+          return;
+        }
+
+        const anchor = resolveExtrudeAnchor(meshHandle.position, meshHandle.normal, meshHandle.kind);
+        const dragPlane = createBrushCreateDragPlane(cameraRef.current, meshHandle.normal, anchor);
+        const startPoint =
+          projectPointerToThreePlane(
+            pointerPositionRef.current.x + bounds.left,
+            pointerPositionRef.current.y + bounds.top,
+            bounds,
+            cameraRef.current,
+            raycasterRef.current,
+            dragPlane
+          ) ?? new Vector3(anchor.x, anchor.y, anchor.z);
+
+        setExtrudeState({
+          amount: 0,
+          baseBrush: structuredClone(selectedBrushNode.data),
+          baseMesh: structuredClone(baseMesh),
+          dragPlane,
+          handle: structuredClone(meshHandle),
+          kind: "brush-mesh",
+          nodeId: selectedBrushNode.id,
+          normal: vec3(meshHandle.normal.x, meshHandle.normal.y, meshHandle.normal.z),
+          previewMesh: structuredClone(baseMesh),
+          startPoint: vec3(startPoint.x, startPoint.y, startPoint.z)
+        });
         return;
       }
 
@@ -414,6 +620,35 @@ export function ViewportCanvas({
         return;
       }
 
+      const modifier = event.metaKey || event.ctrlKey;
+
+      if (event.shiftKey && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        repeatLastMeshEditAction();
+        return;
+      }
+
+      if (modifier && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          updateSelectedNodePivot(undefined);
+          return;
+        }
+
+        const nextPivot =
+          selectedMeshNode && meshEditSelectionIds.length > 0
+            ? computeMeshEditSelectionCenter(meshEditHandles, meshEditSelectionIds)
+            : selectedBrushNode && brushEditHandleIds.length > 0
+              ? computeBrushEditSelectionCenter(brushEditHandles, brushEditHandleIds)
+              : undefined;
+
+        if (nextPivot) {
+          updateSelectedNodePivot(nextPivot);
+        }
+        return;
+      }
+
       if (extrudeState) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -427,6 +662,14 @@ export function ViewportCanvas({
         } else if (event.key.toLowerCase() === "z") {
           event.preventDefault();
           updateExtrudeAxisLock("z");
+        }
+        return;
+      }
+
+      if (faceCutState) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setFaceCutState(null);
         }
         return;
       }
@@ -478,7 +721,13 @@ export function ViewportCanvas({
         return;
       }
 
-      if (event.key.toLowerCase() === "k" && meshEditMode === "edge") {
+      if (event.shiftKey && event.key.toLowerCase() === "k" && meshEditMode === "face") {
+        event.preventDefault();
+        startFaceCutOperation();
+        return;
+      }
+
+      if (!event.shiftKey && event.key.toLowerCase() === "k" && meshEditMode === "edge") {
         const selectedEdges = resolveSelectedEditableMeshEdgePairs();
 
         if (selectedEdges.length === 2) {
@@ -525,11 +774,15 @@ export function ViewportCanvas({
     activeToolId,
     bevelState,
     brushEditHandleIds,
+    brushEditHandles,
     editableMeshHandles,
     editableMeshSource,
     extrudeState,
+    faceCutState,
+    meshEditHandles,
     meshEditMode,
     meshEditSelectionIds,
+    selectedBrushNode,
     selectedMeshNode,
     selectedNode
   ]);
@@ -595,8 +848,50 @@ export function ViewportCanvas({
     commitMeshTopology(bevelState.previewMesh);
   };
 
-  function updateExtrudePreview(clientX: number, clientY: number, bounds: DOMRect) {
-    if (!cameraRef.current || !extrudeState) {
+  function buildExtrudePreviewState(state: ExtrudeGestureState, amount: number): ExtrudeGestureState {
+    if (state.kind === "brush") {
+      const previewBrush =
+        extrudeBrushHandle(
+          state.baseBrush,
+          state.handle,
+          amount,
+          resolveExtrudeDirection(state)
+        ) ?? state.baseBrush;
+      onPreviewBrushData(state.nodeId, previewBrush);
+
+      return {
+        ...state,
+        amount,
+        previewBrush
+      };
+    }
+
+    const previewMesh =
+      state.handle.kind === "face"
+        ? extrudeEditableMeshFace(state.baseMesh, state.handle.id, amount) ?? state.baseMesh
+        : extrudeEditableMeshEdge(
+            state.baseMesh,
+            state.handle.vertexIds as [string, string],
+            amount,
+            resolveExtrudeDirection(state)
+          ) ?? state.baseMesh;
+
+    return {
+      ...state,
+      amount,
+      previewMesh
+    };
+  }
+
+  function updateExtrudePreview(
+    clientX: number,
+    clientY: number,
+    bounds: DOMRect,
+    stateOverride?: ExtrudeGestureState
+  ) {
+    const currentExtrudeState = stateOverride ?? extrudeStateRef.current;
+
+    if (!cameraRef.current || !currentExtrudeState) {
       return;
     }
 
@@ -606,14 +901,14 @@ export function ViewportCanvas({
       bounds,
       cameraRef.current,
       raycasterRef.current,
-      extrudeState.dragPlane
+      currentExtrudeState.dragPlane
     );
 
     if (!point) {
       return;
     }
 
-    const effectiveNormal = resolveExtrudeDirection(extrudeState);
+    const effectiveNormal = resolveExtrudeDirection(currentExtrudeState);
     const extrusionNormal = new Vector3(
       effectiveNormal.x,
       effectiveNormal.y,
@@ -624,49 +919,14 @@ export function ViewportCanvas({
       Math.round(
         point
           .clone()
-          .sub(new Vector3(extrudeState.startPoint.x, extrudeState.startPoint.y, extrudeState.startPoint.z))
+          .sub(new Vector3(currentExtrudeState.startPoint.x, currentExtrudeState.startPoint.y, currentExtrudeState.startPoint.z))
           .dot(extrusionNormal) / viewport.grid.snapSize
       ) * viewport.grid.snapSize
     );
 
-    setExtrudeState((currentState) => {
-      if (!currentState) {
-        return currentState;
-      }
-
-      if (currentState.kind === "brush") {
-        const previewBrush =
-          extrudeBrushHandle(
-            currentState.baseBrush,
-            currentState.handle,
-            amount,
-            resolveExtrudeDirection(currentState)
-          ) ?? currentState.baseBrush;
-        onPreviewBrushData(currentState.nodeId, previewBrush);
-
-        return {
-          ...currentState,
-          amount,
-          previewBrush
-        };
-      }
-
-      const previewMesh =
-        currentState.handle.kind === "face"
-          ? extrudeEditableMeshFace(currentState.baseMesh, currentState.handle.id, amount) ?? currentState.baseMesh
-          : extrudeEditableMeshEdge(
-              currentState.baseMesh,
-              currentState.handle.vertexIds as [string, string],
-              amount
-            ) ?? currentState.baseMesh;
-      onPreviewMeshData(currentState.nodeId, previewMesh);
-
-      return {
-        ...currentState,
-        amount,
-        previewMesh
-      };
-    });
+    const nextState = buildExtrudePreviewState(currentExtrudeState, amount);
+    extrudeStateRef.current = nextState;
+    setExtrudeState(nextState);
   }
 
   function cancelExtrudePreview() {
@@ -676,10 +936,9 @@ export function ViewportCanvas({
 
     if (extrudeState.kind === "brush") {
       onPreviewBrushData(extrudeState.nodeId, extrudeState.baseBrush);
-    } else {
-      onPreviewMeshData(extrudeState.nodeId, extrudeState.baseMesh);
     }
 
+    extrudeStateRef.current = null;
     setExtrudeState(null);
     setTransformDragging(false);
   }
@@ -694,12 +953,22 @@ export function ViewportCanvas({
       return;
     }
 
+    lastMeshEditActionRef.current = {
+      amount: extrudeState.amount,
+      direction: extrudeState.handle.kind === "edge" ? resolveExtrudeDirection(extrudeState) : undefined,
+      handleKind: extrudeState.handle.kind,
+      kind: "extrude"
+    };
+
     if (extrudeState.kind === "brush") {
       onUpdateBrushData(extrudeState.nodeId, extrudeState.previewBrush, extrudeState.baseBrush);
-    } else {
+    } else if (extrudeState.kind === "mesh") {
       onUpdateMeshData(extrudeState.nodeId, extrudeState.previewMesh, extrudeState.baseMesh);
+    } else {
+      commitMeshTopology(extrudeState.previewMesh);
     }
 
+    extrudeStateRef.current = null;
     setExtrudeState(null);
     setTransformDragging(false);
   }
@@ -717,59 +986,63 @@ export function ViewportCanvas({
     const pointer = pointerPositionRef.current;
 
     if (!bounds || !pointer) {
-      setExtrudeState((currentState) =>
-        currentState
-          ? {
-              ...currentState,
-              axisLock
-            }
-          : currentState
-      );
-      return;
-    }
+      const currentState = extrudeStateRef.current;
 
-    setExtrudeState((currentState) => {
       if (!currentState) {
-        return currentState;
+        return;
       }
 
       const nextState = {
         ...currentState,
         axisLock
       };
-      const nextDirection = resolveExtrudeDirection(nextState);
-      const nextDragPlane = createBrushCreateDragPlane(
-        cameraRef.current!,
-        nextDirection,
-        resolveExtrudeAnchor(nextState.handle.position, nextDirection, nextState.handle.kind)
-      );
-      const point = projectPointerToThreePlane(
-        pointer.x + bounds.left,
-        pointer.y + bounds.top,
-        bounds,
-        cameraRef.current!,
-        raycasterRef.current,
-        nextDragPlane
-      );
+      extrudeStateRef.current = nextState;
+      setExtrudeState(nextState);
+      return;
+    }
 
-      if (!point) {
-        return {
+    const currentState = extrudeStateRef.current;
+
+    if (!currentState) {
+      return;
+    }
+
+    const nextState = {
+      ...currentState,
+      axisLock
+    };
+    const nextDirection = resolveExtrudeDirection(nextState);
+    const nextDragPlane = createBrushCreateDragPlane(
+      cameraRef.current!,
+      nextDirection,
+      resolveExtrudeAnchor(nextState.handle.position, nextDirection, nextState.handle.kind)
+    );
+    const point = projectPointerToThreePlane(
+      pointer.x + bounds.left,
+      pointer.y + bounds.top,
+      bounds,
+      cameraRef.current!,
+      raycasterRef.current,
+      nextDragPlane
+    );
+    const nextStateWithPlane = point
+      ? {
+          ...nextState,
+          dragPlane: nextDragPlane,
+          startPoint: vec3(
+            point.x - nextDirection.x * nextState.amount,
+            point.y - nextDirection.y * nextState.amount,
+            point.z - nextDirection.z * nextState.amount
+          )
+        }
+      : {
           ...nextState,
           dragPlane: nextDragPlane
         };
-      }
 
-      const directionVector = new Vector3(nextDirection.x, nextDirection.y, nextDirection.z).normalize();
-      const startPoint = point.clone().sub(directionVector.multiplyScalar(nextState.amount));
-
-      return {
-        ...nextState,
-        dragPlane: nextDragPlane,
-        startPoint: vec3(startPoint.x, startPoint.y, startPoint.z)
-      };
-    });
-
-    updateExtrudePreview(pointer.x + bounds.left, pointer.y + bounds.top, bounds);
+    extrudeStateRef.current = nextStateWithPlane;
+    setExtrudeState(nextStateWithPlane);
+    updateExtrudePreview(pointer.x + bounds.left, pointer.y + bounds.top, bounds, nextStateWithPlane);
   }
 
   const updateBrushCreatePreview = (clientX: number, clientY: number, bounds: DOMRect) => {
@@ -934,7 +1207,7 @@ export function ViewportCanvas({
     const bounds = event.currentTarget.getBoundingClientRect();
     pointerPositionRef.current = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
 
-    if (extrudeState || bevelState) {
+    if (extrudeState || bevelState || faceCutState) {
       return;
     }
 
@@ -956,6 +1229,10 @@ export function ViewportCanvas({
 
     if (extrudeState) {
       updateExtrudePreview(event.clientX, event.clientY, bounds);
+      return;
+    }
+
+    if (faceCutState) {
       return;
     }
 
@@ -997,6 +1274,10 @@ export function ViewportCanvas({
       if (event.button === 0) {
         commitExtrudePreview();
       }
+      return;
+    }
+
+    if (faceCutState) {
       return;
     }
 
@@ -1113,7 +1394,7 @@ export function ViewportCanvas({
           cameraRef.current = state.camera as PerspectiveCamera;
         }}
         onPointerMissed={() => {
-          if (activeToolId === "brush" || extrudeState || bevelState || marqueeOriginRef.current || marquee) {
+          if (activeToolId === "brush" || extrudeState || bevelState || faceCutState || marqueeOriginRef.current || marquee) {
             return;
           }
 
@@ -1141,13 +1422,18 @@ export function ViewportCanvas({
           shadow-normalBias={0.045}
         />
         <EditorCameraRig
-          controlsEnabled={!marquee && !transformDragging && !brushCreateState && !bevelState && !extrudeState}
+          controlsEnabled={!marquee && !transformDragging && !brushCreateState && !bevelState && !extrudeState && !faceCutState}
           viewport={viewport}
         />
         <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} />
         <axesHelper args={[3]} />
         <ScenePreview
-          hiddenNodeIds={bevelState && selectedNode ? [selectedNode.id] : []}
+          hiddenNodeIds={
+            selectedNode &&
+            (bevelState || extrudeState?.kind === "brush-mesh" || (extrudeState?.kind === "mesh" && extrudeState.handle.kind === "edge"))
+              ? [selectedNode.id]
+              : []
+          }
           interactive={activeToolId !== "brush"}
           onFocusNode={onFocusNode}
           onMeshObjectChange={handleMeshObjectChange}
@@ -1156,6 +1442,9 @@ export function ViewportCanvas({
           selectedNodeIds={selectedNodeIds}
         />
         {bevelState && selectedNode ? <EditableMeshPreviewOverlay mesh={bevelState.previewMesh} node={selectedNode} /> : null}
+        {(extrudeState?.kind === "mesh" || extrudeState?.kind === "brush-mesh") && selectedNode ? (
+          <EditableMeshPreviewOverlay mesh={extrudeState.previewMesh} node={selectedNode} />
+        ) : null}
         {extrudeState && selectedNode ? (
           <ExtrudeAxisGuide node={selectedNode} state={extrudeState} viewport={viewport} />
         ) : null}
@@ -1169,9 +1458,22 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
+        {activeToolId === "mesh-edit" && faceCutState && selectedNode && editableMeshSource ? (
+          <MeshCutOverlay
+            faceId={faceCutState.faceId}
+            mesh={editableMeshSource}
+            node={selectedNode}
+            onCommitCut={(mesh) => {
+              setFaceCutState(null);
+              commitMeshTopology(mesh);
+            }}
+            viewport={viewport}
+          />
+        ) : null}
         {activeToolId === "extrude" && selectedBrushNode ? (
           <BrushExtrudeOverlay
             node={selectedBrushNode}
+            onCommitMeshTopology={onCommitMeshTopology}
             onPreviewBrushData={onPreviewBrushData}
             onUpdateBrushData={onUpdateBrushData}
             setTransformDragging={setTransformDragging}
@@ -1181,17 +1483,19 @@ export function ViewportCanvas({
         {activeToolId === "extrude" && selectedMeshNode ? (
           <MeshExtrudeOverlay
             node={selectedMeshNode}
-            onPreviewMeshData={onPreviewMeshData}
             onUpdateMeshData={onUpdateMeshData}
             setTransformDragging={setTransformDragging}
             viewport={viewport}
           />
         ) : null}
-        {activeToolId === "mesh-edit" && selectedBrushNode && !bevelState && !extrudeState ? (
+        {activeToolId === "mesh-edit" && selectedBrushNode && !bevelState && !extrudeState && !faceCutState ? (
           <BrushEditOverlay
             handles={brushEditHandles}
             meshEditMode={meshEditMode}
             node={selectedBrushNode}
+            onCommitTransformAction={(action) => {
+              lastMeshEditActionRef.current = action;
+            }}
             onPreviewBrushData={onPreviewBrushData}
             onUpdateBrushData={onUpdateBrushData}
             selectedHandleIds={brushEditHandleIds}
@@ -1200,11 +1504,14 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {activeToolId === "mesh-edit" && selectedMeshNode && !bevelState && !extrudeState ? (
+        {activeToolId === "mesh-edit" && selectedMeshNode && !bevelState && !extrudeState && !faceCutState ? (
           <MeshEditOverlay
             handles={meshEditHandles}
             meshEditMode={meshEditMode}
             node={selectedMeshNode}
+            onCommitTransformAction={(action) => {
+              lastMeshEditActionRef.current = action;
+            }}
             onPreviewMeshData={onPreviewMeshData}
             onUpdateMeshData={onUpdateMeshData}
             selectedHandleIds={meshEditSelectionIds}
@@ -1217,13 +1524,14 @@ export function ViewportCanvas({
           activeToolId={activeToolId}
           onPreviewNodeTransform={onPreviewNodeTransform}
           onUpdateNodeTransform={onUpdateNodeTransform}
+          selectedNode={selectedNode}
           selectedNodeIds={selectedNodeIds}
           transformMode={transformMode}
           viewport={viewport}
         />
       </Canvas>
 
-      {bevelState || extrudeState ? <div className="pointer-events-none absolute inset-0 z-20 cursor-crosshair" /> : null}
+      {bevelState || extrudeState || faceCutState ? <div className="pointer-events-none absolute inset-0 z-20 cursor-crosshair" /> : null}
 
       {marqueeRect ? (
         <div

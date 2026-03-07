@@ -1,7 +1,8 @@
 import { triangulateEditableMesh } from "@web-hammer/geometry-kernel";
-import { toTuple, type EditableMesh, type GeometryNode } from "@web-hammer/shared";
+import { type EditableMesh, type GeometryNode } from "@web-hammer/shared";
 import { useEffect, useMemo } from "react";
 import { FrontSide, WireframeGeometry } from "three";
+import { NodeTransformGroup } from "@/viewport/components/NodeTransformGroup";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
 
 export function EditableMeshPreviewOverlay({
@@ -36,11 +37,7 @@ export function EditableMeshPreviewOverlay({
   }
 
   return (
-    <group
-      position={toTuple(node.transform.position)}
-      rotation={toTuple(node.transform.rotation)}
-      scale={toTuple(node.transform.scale)}
-    >
+    <NodeTransformGroup transform={node.transform}>
       <mesh geometry={geometry} renderOrder={11}>
         <meshStandardMaterial
           color="#8b5cf6"
@@ -60,6 +57,6 @@ export function EditableMeshPreviewOverlay({
           <lineBasicMaterial color="#f8fafc" depthWrite={false} opacity={0.95} toneMapped={false} transparent />
         </lineSegments>
       ) : null}
-    </group>
+    </NodeTransformGroup>
   );
 }

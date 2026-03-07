@@ -62,11 +62,17 @@ export function FaceHitArea({
 export function EditableFaceSelectionHitArea({
   normal,
   onSelect,
+  onHover,
+  onHoverEnd,
+  onSelectPoint,
   points,
   selected
 }: {
   normal?: Vec3;
   onSelect: (event: any) => void;
+  onHover?: (point: Vec3) => void;
+  onHoverEnd?: () => void;
+  onSelectPoint?: (point: Vec3, event: any) => void;
   points: Vec3[];
   selected: boolean;
 }) {
@@ -87,7 +93,37 @@ export function EditableFaceSelectionHitArea({
   }
 
   return (
-    <mesh geometry={geometry} onClick={onSelect} renderOrder={7}>
+    <mesh
+      geometry={geometry}
+      onClick={(event) => {
+        if (!onSelectPoint) {
+          onSelect(event);
+          return;
+        }
+
+        event.stopPropagation();
+        const localPoint = event.object.worldToLocal(event.point.clone());
+        onSelectPoint(vec3(localPoint.x, localPoint.y, localPoint.z), event);
+      }}
+      onPointerMove={(event) => {
+        if (!onHover) {
+          return;
+        }
+
+        event.stopPropagation();
+        const localPoint = event.object.worldToLocal(event.point.clone());
+        onHover(vec3(localPoint.x, localPoint.y, localPoint.z));
+      }}
+      onPointerOut={(event) => {
+        if (!onHoverEnd) {
+          return;
+        }
+
+        event.stopPropagation();
+        onHoverEnd();
+      }}
+      renderOrder={7}
+    >
       <meshBasicMaterial
         color="#93c5fd"
         depthWrite={false}

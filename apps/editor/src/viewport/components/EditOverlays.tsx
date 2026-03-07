@@ -1,19 +1,23 @@
+import { convertBrushToEditableMesh } from "@web-hammer/geometry-kernel";
 import { TransformControls } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toTuple, type Brush, type EditableMesh, type GeometryNode, type Transform } from "@web-hammer/shared";
+import { type Brush, type EditableMesh, type GeometryNode, type Transform } from "@web-hammer/shared";
 import {
   applyBrushEditTransform,
+  collectMeshEdgeLoop,
   applyMeshEditTransform,
   computeBrushEditSelectionCenter,
   computeMeshEditSelectionCenter,
+  createMeshEditHandles,
   type BrushEditHandle,
   type MeshEditHandle,
   type MeshEditMode
 } from "@/viewport/editing";
 import type { ViewportCanvasProps } from "@/viewport/types";
 import type { ViewportState } from "@web-hammer/render-pipeline";
+import { NodeTransformGroup } from "@/viewport/components/NodeTransformGroup";
 import { objectToTransform } from "@/viewport/utils/geometry";
-import { resolveSubobjectSelection } from "@/viewport/utils/interaction";
+import { findMatchingBrushEdgeHandleId, findMatchingMeshEdgePair, resolveSubobjectSelection } from "@/viewport/utils/interaction";
 import {
   BrushEditHandleVisual,
   EditableEdgeSelectionHitArea,
@@ -21,11 +25,13 @@ import {
   MeshEditHandleVisual
 } from "@/viewport/components/SelectionVisuals";
 import { Object3D } from "three";
+import type { LastMeshEditAction } from "@/viewport/types";
 
 export function MeshEditOverlay({
   handles,
   meshEditMode,
   node,
+  onCommitTransformAction,
   onPreviewMeshData,
   onUpdateMeshData,
   selectedHandleIds,
@@ -36,6 +42,7 @@ export function MeshEditOverlay({
   handles: MeshEditHandle[];
   meshEditMode: MeshEditMode;
   node: Extract<GeometryNode, { kind: "mesh" }>;
+  onCommitTransformAction?: (action: LastMeshEditAction) => void;
   onPreviewMeshData: ViewportCanvasProps["onPreviewMeshData"];
   onUpdateMeshData: ViewportCanvasProps["onUpdateMeshData"];
   selectedHandleIds: string[];
@@ -77,13 +84,31 @@ export function MeshEditOverlay({
     }
   }, [selectedHandleIds.length, selectionCenter]);
 
+  const resolveHandleSelection = (handle: MeshEditHandle, event: { altKey: boolean; shiftKey: boolean }) => {
+    if (meshEditMode !== "edge" || !event.altKey || handle.vertexIds.length !== 2) {
+      setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+      return;
+    }
+
+    const loopIds = collectMeshEdgeLoop(node.data, handle.vertexIds as [string, string])
+      .map((edge) => handles.find((candidate) => candidate.vertexIds.length === 2 && candidate.vertexIds.every((vertexId) => edge.includes(vertexId)))?.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (!event.shiftKey) {
+      setSelectedHandleIds(loopIds);
+      return;
+    }
+
+    const nextSelection = loopIds.every((id) => selectedHandleIds.includes(id))
+      ? selectedHandleIds.filter((id) => !loopIds.includes(id))
+      : Array.from(new Set([...selectedHandleIds, ...loopIds]));
+
+    setSelectedHandleIds(nextSelection);
+  };
+
   return (
     <>
-      <group
-        position={toTuple(node.transform.position)}
-        rotation={toTuple(node.transform.rotation)}
-        scale={toTuple(node.transform.scale)}
-      >
+      <NodeTransformGroup transform={node.transform}>
         {handles.map((handle) => {
           const selected = selectedHandleIds.includes(handle.id);
 
@@ -94,7 +119,7 @@ export function MeshEditOverlay({
                   normal={handle.normal}
                   onSelect={(event) => {
                     event.stopPropagation();
-                    setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                    resolveHandleSelection(handle, event);
                   }}
                   points={handle.points}
                   selected={selected}
@@ -104,7 +129,7 @@ export function MeshEditOverlay({
                 <EditableEdgeSelectionHitArea
                   onSelect={(event) => {
                     event.stopPropagation();
-                    setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                    resolveHandleSelection(handle, event);
                   }}
                   points={handle.points}
                   selected={selected}
@@ -115,7 +140,7 @@ export function MeshEditOverlay({
                 mode={meshEditMode}
                 onSelect={(event) => {
                   event.stopPropagation();
-                  setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                  resolveHandleSelection(handle, event);
                 }}
                 selected={selected}
               />
@@ -142,7 +167,7 @@ export function MeshEditOverlay({
             </mesh>
           </group>
         ) : null}
-      </group>
+      </NodeTransformGroup>
 
       {selectedHandleIds.length > 0 && controlObject ? (
         <TransformControls
@@ -167,6 +192,17 @@ export function MeshEditOverlay({
               objectToTransform(controlObject)
             );
             onUpdateMeshData(node.id, nextMesh, baselineMeshRef.current);
+            onCommitTransformAction?.({
+              kind: "subobject-transform",
+              mode: meshEditMode,
+              rotation: objectToTransform(controlObject).rotation,
+              scale: objectToTransform(controlObject).scale,
+              translation: {
+                x: controlObject.position.x - baselineTransformRef.current.position.x,
+                y: controlObject.position.y - baselineTransformRef.current.position.y,
+                z: controlObject.position.z - baselineTransformRef.current.position.z
+              }
+            });
             baselineMeshRef.current = undefined;
             baselineTransformRef.current = undefined;
           }}
@@ -200,6 +236,7 @@ export function BrushEditOverlay({
   handles,
   meshEditMode,
   node,
+  onCommitTransformAction,
   onPreviewBrushData,
   onUpdateBrushData,
   selectedHandleIds,
@@ -210,6 +247,7 @@ export function BrushEditOverlay({
   handles: BrushEditHandle[];
   meshEditMode: MeshEditMode;
   node: Extract<GeometryNode, { kind: "brush" }>;
+  onCommitTransformAction?: (action: LastMeshEditAction) => void;
   onPreviewBrushData: ViewportCanvasProps["onPreviewBrushData"];
   onUpdateBrushData: ViewportCanvasProps["onUpdateBrushData"];
   selectedHandleIds: string[];
@@ -225,6 +263,11 @@ export function BrushEditOverlay({
   const selectionCenter = useMemo(
     () => computeBrushEditSelectionCenter(handles, selectedHandleIds),
     [handles, selectedHandleIds]
+  );
+  const editableMesh = useMemo(() => convertBrushToEditableMesh(node.data), [node.data]);
+  const editableMeshHandles = useMemo(
+    () => (editableMesh ? createMeshEditHandles(editableMesh, "edge") : []),
+    [editableMesh]
   );
 
   useEffect(() => {
@@ -252,13 +295,49 @@ export function BrushEditOverlay({
     }
   }, [selectedHandleIds.length, selectionCenter]);
 
+  const resolveHandleSelection = (handle: BrushEditHandle, event: { altKey: boolean; shiftKey: boolean }) => {
+    if (
+      meshEditMode !== "edge" ||
+      !event.altKey ||
+      !editableMesh ||
+      !handle.points ||
+      handle.points.length !== 2
+    ) {
+      setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+      return;
+    }
+
+    const edgePair = findMatchingMeshEdgePair(editableMeshHandles, handle);
+
+    if (!edgePair) {
+      setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+      return;
+    }
+
+    const loopIds = collectMeshEdgeLoop(editableMesh, edgePair)
+      .map((edge) =>
+        editableMeshHandles.find(
+          (candidate) => candidate.vertexIds.length === 2 && candidate.vertexIds.every((vertexId) => edge.includes(vertexId))
+        )
+      )
+      .map((meshHandle) => (meshHandle ? findMatchingBrushEdgeHandleId(handles, meshHandle) : undefined))
+      .filter((id): id is string => Boolean(id));
+
+    if (!event.shiftKey) {
+      setSelectedHandleIds(loopIds);
+      return;
+    }
+
+    const nextSelection = loopIds.every((id) => selectedHandleIds.includes(id))
+      ? selectedHandleIds.filter((id) => !loopIds.includes(id))
+      : Array.from(new Set([...selectedHandleIds, ...loopIds]));
+
+    setSelectedHandleIds(nextSelection);
+  };
+
   return (
     <>
-      <group
-        position={toTuple(node.transform.position)}
-        rotation={toTuple(node.transform.rotation)}
-        scale={toTuple(node.transform.scale)}
-      >
+      <NodeTransformGroup transform={node.transform}>
         {handles.map((handle) => {
           const selected = selectedHandleIds.includes(handle.id);
 
@@ -269,7 +348,7 @@ export function BrushEditOverlay({
                   normal={handle.normal}
                   onSelect={(event) => {
                     event.stopPropagation();
-                    setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                    resolveHandleSelection(handle, event);
                   }}
                   points={handle.points}
                   selected={selected}
@@ -279,7 +358,7 @@ export function BrushEditOverlay({
                 <EditableEdgeSelectionHitArea
                   onSelect={(event) => {
                     event.stopPropagation();
-                    setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                    resolveHandleSelection(handle, event);
                   }}
                   points={handle.points}
                   selected={selected}
@@ -290,7 +369,7 @@ export function BrushEditOverlay({
                 mode={meshEditMode}
                 onSelect={(event) => {
                   event.stopPropagation();
-                  setSelectedHandleIds(resolveSubobjectSelection(selectedHandleIds, handle.id, event.shiftKey));
+                  resolveHandleSelection(handle, event);
                 }}
                 selected={selected}
               />
@@ -317,7 +396,7 @@ export function BrushEditOverlay({
             </mesh>
           </group>
         ) : null}
-      </group>
+      </NodeTransformGroup>
 
       {selectedHandleIds.length > 0 && controlObject ? (
         <TransformControls
@@ -346,6 +425,17 @@ export function BrushEditOverlay({
 
             if (nextBrush) {
               onUpdateBrushData(node.id, nextBrush, baselineBrushRef.current);
+              onCommitTransformAction?.({
+                kind: "subobject-transform",
+                mode: meshEditMode,
+                rotation: objectToTransform(controlObject).rotation,
+                scale: objectToTransform(controlObject).scale,
+                translation: {
+                  x: controlObject.position.x - baselineTransformRef.current.position.x,
+                  y: controlObject.position.y - baselineTransformRef.current.position.y,
+                  z: controlObject.position.z - baselineTransformRef.current.position.z
+                }
+              });
             } else {
               onPreviewBrushData(node.id, baselineBrushRef.current);
             }

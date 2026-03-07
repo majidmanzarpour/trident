@@ -1,8 +1,9 @@
 import { reconstructBrushFaces, type ReconstructedBrushFace } from "@web-hammer/geometry-kernel";
-import { toTuple, vec3, type GeometryNode } from "@web-hammer/shared";
+import { vec3, type GeometryNode } from "@web-hammer/shared";
 import { useEffect, useMemo, useState } from "react";
 import { Vector3 } from "three";
 import { buildClipPreview } from "@/viewport/editing";
+import { NodeTransformGroup } from "@/viewport/components/NodeTransformGroup";
 import { FaceHitArea, PreviewLine } from "@/viewport/components/SelectionVisuals";
 import type { ViewportCanvasProps } from "@/viewport/types";
 import type { ViewportState } from "@web-hammer/render-pipeline";
@@ -42,11 +43,7 @@ export function BrushClipOverlay({
   };
 
   return (
-    <group
-      position={toTuple(node.transform.position)}
-      rotation={toTuple(node.transform.rotation)}
-      scale={toTuple(node.transform.scale)}
-    >
+    <NodeTransformGroup transform={node.transform}>
       {rebuilt.faces.map((face) => (
         <FaceHitArea
           face={face}
@@ -67,6 +64,6 @@ export function BrushClipOverlay({
       ))}
 
       {preview?.line ? <PreviewLine color="#7dd3fc" end={preview.line.end} start={preview.line.start} /> : null}
-    </group>
+    </NodeTransformGroup>
   );
 }

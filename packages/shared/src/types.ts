@@ -15,6 +15,7 @@ export type Vec3 = {
 
 export type Transform = {
   position: Vec3;
+  pivot?: Vec3;
   rotation: Vec3;
   scale: Vec3;
 };

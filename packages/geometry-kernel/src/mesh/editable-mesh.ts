@@ -18,6 +18,7 @@ import { almostEqual, vec3 } from "@web-hammer/shared";
 export type EditableMeshPolygon = {
   id?: FaceID;
   positions: Vec3[];
+  vertexIds?: VertexID[];
 };
 
 export type EditableMeshValidation = {
@@ -50,6 +51,10 @@ export function createEditableMeshFromPolygons(
 
   polygons.forEach((polygon, polygonIndex) => {
     const orderedPositions = normalizePolygonLoop(polygon.positions);
+    const orderedVertexIds =
+      polygon.vertexIds && polygon.vertexIds.length >= orderedPositions.length
+        ? polygon.vertexIds.slice(0, orderedPositions.length)
+        : undefined;
 
     if (orderedPositions.length < 3) {
       return;
@@ -63,12 +68,19 @@ export function createEditableMeshFromPolygons(
     const faceHalfEdges: EditableMeshHalfEdge[] = [];
 
     orderedVertices.forEach((position, edgeIndex) => {
-      const currentVertex = registerMeshVertex(vertexRegistry, vertices, position, epsilon);
+      const currentVertex = registerMeshVertex(
+        vertexRegistry,
+        vertices,
+        position,
+        epsilon,
+        orderedVertexIds?.[edgeIndex]
+      );
       const nextVertex = registerMeshVertex(
         vertexRegistry,
         vertices,
         orderedVertices[(edgeIndex + 1) % orderedVertices.length],
-        epsilon
+        epsilon,
+        orderedVertexIds?.[(edgeIndex + 1) % orderedVertices.length]
       );
       const halfEdge: EditableMeshHalfEdge = {
         id: `half-edge:${faceId}:${edgeIndex}`,
@@ -241,9 +253,10 @@ function registerMeshVertex(
   registry: Map<string, EditableMeshVertex>,
   vertices: EditableMeshVertex[],
   position: Vec3,
-  epsilon: number
+  epsilon: number,
+  preferredId?: VertexID
 ): EditableMeshVertex {
-  const key = makeVertexKey(position, epsilon);
+  const key = preferredId ? `id:${preferredId}` : makeVertexKey(position, epsilon);
   const existing = registry.get(key);
 
   if (existing) {
@@ -251,7 +264,7 @@ function registerMeshVertex(
   }
 
   const vertex = {
-    id: `vertex:mesh:${vertices.length}`,
+    id: preferredId ?? `vertex:mesh:${vertices.length}`,
     position: vec3(position.x, position.y, position.z)
   };
 

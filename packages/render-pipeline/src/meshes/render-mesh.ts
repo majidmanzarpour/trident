@@ -38,6 +38,7 @@ export type DerivedRenderMesh = {
   bvhEnabled: boolean;
   label: string;
   position: Vec3;
+  pivot?: Vec3;
   rotation: Vec3;
   scale: Vec3;
   primitive?: RenderPrimitive;
@@ -64,6 +65,7 @@ export function createDerivedRenderMesh(
     bvhEnabled: true,
     label: `${node.name} (${appearance.primitiveLabel})`,
     position: node.transform.position,
+    pivot: node.transform.pivot,
     rotation: node.transform.rotation,
     scale: node.transform.scale,
     primitive: isModelNode(node)

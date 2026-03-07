@@ -80,6 +80,10 @@ export function makeTransform(position = vec3(0, 0, 0)): Transform {
   };
 }
 
+export function resolveTransformPivot(transform: Transform): Vec3 {
+  return transform.pivot ?? vec3(0, 0, 0);
+}
+
 export function isBrushNode(node: GeometryNode): node is BrushNode {
   return node.kind === "brush";
 }

@@ -2,6 +2,7 @@ import { createAxisAlignedBrushFromBounds } from "@web-hammer/geometry-kernel";
 import {
   dotVec3,
   makeTransform,
+  resolveTransformPivot,
   snapValue,
   subVec3,
   vec3,
@@ -201,7 +202,9 @@ export function projectLocalPointToScreen(
   camera: PerspectiveCamera,
   viewportBounds: DOMRect
 ) {
+  const pivot = resolveTransformPivot(node.transform);
   const worldPoint = new Vector3(point.x, point.y, point.z)
+    .sub(new Vector3(pivot.x, pivot.y, pivot.z))
     .multiply(new Vector3(node.transform.scale.x, node.transform.scale.y, node.transform.scale.z))
     .applyEuler(new Euler(node.transform.rotation.x, node.transform.rotation.y, node.transform.rotation.z, "XYZ"))
     .add(new Vector3(node.transform.position.x, node.transform.position.y, node.transform.position.z))

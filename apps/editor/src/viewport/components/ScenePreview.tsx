@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FrontSide, Mesh } from "three";
 import { disableBvhRaycast, enableBvhRaycast, type DerivedRenderMesh, type DerivedRenderScene } from "@web-hammer/render-pipeline";
-import { toTuple } from "@web-hammer/shared";
+import { resolveTransformPivot, toTuple } from "@web-hammer/shared";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
 
 export function ScenePreview({
@@ -121,68 +121,79 @@ function RenderPrimitive({
     emissive: selected ? "#f69036" : hovered ? "#2a7f74" : "#000000",
     emissiveIntensity: selected ? 0.42 : hovered ? 0.16 : 0
   };
+  const pivot = resolveTransformPivot({
+    pivot: mesh.pivot,
+    position: mesh.position,
+    rotation: mesh.rotation,
+    scale: mesh.scale
+  });
 
   return (
-    <mesh
-      castShadow
+    <group
       name={`node:${mesh.nodeId}`}
-      onClick={(event) => {
-        if (!interactive) {
-          return;
-        }
-
-        event.stopPropagation();
-        onSelectNodes([mesh.nodeId]);
-      }}
-      onDoubleClick={(event) => {
-        if (!interactive) {
-          return;
-        }
-
-        event.stopPropagation();
-        onFocusNode(mesh.nodeId);
-      }}
-      onPointerOut={(event) => {
-        if (!interactive) {
-          return;
-        }
-
-        event.stopPropagation();
-        onHoverEnd();
-      }}
-      onPointerOver={(event) => {
-        if (!interactive) {
-          return;
-        }
-
-        event.stopPropagation();
-        onHoverStart(mesh.nodeId);
-      }}
-      ref={(object) => {
-        setMeshObject(object);
-        onMeshObjectChange(mesh.nodeId, object);
-      }}
-      receiveShadow
       position={toTuple(mesh.position)}
       rotation={toTuple(mesh.rotation)}
       scale={toTuple(mesh.scale)}
     >
-      {geometry ? <primitive attach="geometry" object={geometry} /> : null}
-      {mesh.primitive?.kind === "box" ? <boxGeometry args={toTuple(mesh.primitive.size)} /> : null}
-      {mesh.primitive?.kind === "icosahedron" ? (
-        <icosahedronGeometry args={[mesh.primitive.radius, mesh.primitive.detail]} />
-      ) : null}
-      {mesh.primitive?.kind === "cylinder" ? (
-        <cylinderGeometry
-          args={[
-            mesh.primitive.radiusTop,
-            mesh.primitive.radiusBottom,
-            mesh.primitive.height,
-            mesh.primitive.radialSegments
-          ]}
-        />
-      ) : null}
-      <meshStandardMaterial {...materialProps} />
-    </mesh>
+      <group position={[-pivot.x, -pivot.y, -pivot.z]}>
+        <mesh
+          castShadow
+          onClick={(event) => {
+            if (!interactive) {
+              return;
+            }
+
+            event.stopPropagation();
+            onSelectNodes([mesh.nodeId]);
+          }}
+          onDoubleClick={(event) => {
+            if (!interactive) {
+              return;
+            }
+
+            event.stopPropagation();
+            onFocusNode(mesh.nodeId);
+          }}
+          onPointerOut={(event) => {
+            if (!interactive) {
+              return;
+            }
+
+            event.stopPropagation();
+            onHoverEnd();
+          }}
+          onPointerOver={(event) => {
+            if (!interactive) {
+              return;
+            }
+
+            event.stopPropagation();
+            onHoverStart(mesh.nodeId);
+          }}
+          ref={(object) => {
+            setMeshObject(object);
+            onMeshObjectChange(mesh.nodeId, object);
+          }}
+          receiveShadow
+        >
+          {geometry ? <primitive attach="geometry" object={geometry} /> : null}
+          {mesh.primitive?.kind === "box" ? <boxGeometry args={toTuple(mesh.primitive.size)} /> : null}
+          {mesh.primitive?.kind === "icosahedron" ? (
+            <icosahedronGeometry args={[mesh.primitive.radius, mesh.primitive.detail]} />
+          ) : null}
+          {mesh.primitive?.kind === "cylinder" ? (
+            <cylinderGeometry
+              args={[
+                mesh.primitive.radiusTop,
+                mesh.primitive.radiusBottom,
+                mesh.primitive.height,
+                mesh.primitive.radialSegments
+              ]}
+            />
+          ) : null}
+          <meshStandardMaterial {...materialProps} />
+        </mesh>
+      </group>
+    </group>
   );
 }

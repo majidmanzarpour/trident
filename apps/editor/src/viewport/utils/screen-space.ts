@@ -1,4 +1,4 @@
-import type { GeometryNode, Vec3 } from "@web-hammer/shared";
+import { resolveTransformPivot, type GeometryNode, type Vec3 } from "@web-hammer/shared";
 import { Box3, Euler, Mesh, type PerspectiveCamera, Vector2, Vector3 } from "three";
 
 export type ScreenRect = {
@@ -51,7 +51,9 @@ export function projectLocalPointToScreen(
   camera: PerspectiveCamera,
   viewportBounds: DOMRect
 ) {
+  const pivot = resolveTransformPivot(node.transform);
   const worldPoint = new Vector3(point.x, point.y, point.z)
+    .sub(new Vector3(pivot.x, pivot.y, pivot.z))
     .multiply(new Vector3(node.transform.scale.x, node.transform.scale.y, node.transform.scale.z))
     .applyEuler(new Euler(node.transform.rotation.x, node.transform.rotation.y, node.transform.rotation.z, "XYZ"))
     .add(new Vector3(node.transform.position.x, node.transform.position.y, node.transform.position.z))

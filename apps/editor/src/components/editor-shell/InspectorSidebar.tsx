@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import type { Asset, GeometryNode, Material, Transform, Vec3 } from "@web-hammer/shared";
+import { vec3, type Asset, type GeometryNode, type Material, type Transform, type Vec3 } from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
 import { Button } from "@/components/ui/button";
 import { DragInput } from "@/components/ui/drag-input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FloatingPanel } from "@/components/editor-shell/FloatingPanel";
+import { rebaseTransformPivot } from "@/viewport/utils/geometry";
 import { cn } from "@/lib/utils";
 
 type InspectorSidebarProps = {
@@ -70,7 +71,10 @@ export function InspectorSidebar({
     selectedNode?.transform.rotation.z,
     selectedNode?.transform.scale.x,
     selectedNode?.transform.scale.y,
-    selectedNode?.transform.scale.z
+    selectedNode?.transform.scale.z,
+    selectedNode?.transform.pivot?.x,
+    selectedNode?.transform.pivot?.y,
+    selectedNode?.transform.pivot?.z
   ]);
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
@@ -79,13 +83,22 @@ export function InspectorSidebar({
   const selectedIsMesh = selectedNode?.kind === "mesh";
 
   const updateDraftAxis = (
-    group: "position" | "rotation" | "scale",
+    group: "position" | "pivot" | "rotation" | "scale",
     axis: (typeof AXES)[number],
     value: number
   ) => {
     setDraftTransform((current) => {
       if (!current) {
         return current;
+      }
+
+      if (group === "pivot") {
+        const currentPivot = current.pivot ?? vec3(0, 0, 0);
+
+        return rebaseTransformPivot(current, {
+          ...currentPivot,
+          [axis]: value
+        });
       }
 
       return {
@@ -162,6 +175,33 @@ export function InspectorSidebar({
                         step={0.05}
                         values={draftTransform.scale}
                       />
+                      <TransformGroup
+                        label="Pivot"
+                        onCommit={commitDraftTransform}
+                        onUpdate={(axis, value) => updateDraftAxis("pivot", axis, value)}
+                        precision={2}
+                        step={0.05}
+                        values={draftTransform.pivot ?? vec3(0, 0, 0)}
+                      />
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          onClick={() => {
+                            if (!selectedNode || !draftTransform) {
+                              return;
+                            }
+
+                            onUpdateNodeTransform(
+                              selectedNode.id,
+                              rebaseTransformPivot(draftTransform, undefined),
+                              selectedNode.transform
+                            );
+                          }}
+                          size="xs"
+                          variant="ghost"
+                        >
+                          Reset Pivot
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
 

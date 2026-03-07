@@ -60,6 +60,18 @@ export function findMatchingMeshEdgePair(
     ?.vertexIds as [string, string] | undefined;
 }
 
+export function findMatchingBrushEdgeHandleId(
+  brushHandles: BrushEditHandle[],
+  meshHandle: MeshEditHandle,
+  epsilon = 0.001
+) {
+  if (!meshHandle.points || meshHandle.points.length !== 2) {
+    return undefined;
+  }
+
+  return brushHandles.find((handle) => handle.points?.length === 2 && segmentsMatch(handle.points, meshHandle.points!, epsilon))?.id;
+}
+
 export function rejectVec3FromAxis(vector: Vec3, axis: Vec3) {
   return subVec3(vector, {
     x: axis.x * dotVec3(vector, axis),

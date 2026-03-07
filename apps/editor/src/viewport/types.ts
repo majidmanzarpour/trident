@@ -70,6 +70,21 @@ export type BevelState = {
   width: number;
 };
 
+export type LastMeshEditAction =
+  | {
+      amount: number;
+      direction?: Vec3;
+      handleKind: "edge" | "face";
+      kind: "extrude";
+    }
+  | {
+      kind: "subobject-transform";
+      mode: MeshEditMode;
+      rotation: Vec3;
+      scale: Vec3;
+      translation: Vec3;
+    };
+
 export type ExtrudeGestureState =
   | {
       amount: number;
@@ -81,6 +96,19 @@ export type ExtrudeGestureState =
       nodeId: string;
       normal: Vec3;
       previewBrush: Brush;
+      startPoint: Vec3;
+    }
+  | {
+      amount: number;
+      axisLock?: "x" | "y" | "z";
+      baseBrush: Brush;
+      baseMesh: EditableMesh;
+      dragPlane: Plane;
+      handle: MeshExtrudeHandle;
+      kind: "brush-mesh";
+      nodeId: string;
+      normal: Vec3;
+      previewMesh: EditableMesh;
       startPoint: Vec3;
     }
   | {

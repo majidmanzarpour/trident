@@ -1,5 +1,6 @@
 import {
   computePolygonNormal,
+  getFaceVertexIds,
   getFaceVertices,
   reconstructBrushFaces,
   sortVerticesOnPlane,
@@ -335,13 +336,106 @@ export function createBrushExtrudeHandles(brush: Brush): BrushExtrudeHandle[] {
 }
 
 export function createMeshExtrudeHandles(mesh: EditableMesh): MeshExtrudeHandle[] {
-  return createMeshEditHandles(mesh, "face")
-    .filter((handle): handle is MeshEditHandle & { normal: Vec3 } => Boolean(handle.normal))
-    .map((handle) => ({
-      ...handle,
-      kind: "face" as const,
-      normal: handle.normal
-    }));
+  const faceHandles = createMeshEditHandles(mesh, "face").filter(
+    (handle): handle is MeshEditHandle & { normal: Vec3 } => Boolean(handle.normal)
+  );
+  const faceExtrudeHandles: MeshExtrudeHandle[] = faceHandles.map((handle) => ({
+    ...handle,
+    kind: "face" as const,
+    normal: handle.normal
+  }));
+  const edgeNormals = new Map<string, Vec3[]>();
+
+  faceHandles.forEach((handle) => {
+    handle.vertexIds.forEach((vertexId, index) => {
+      const nextVertexId = handle.vertexIds[(index + 1) % handle.vertexIds.length];
+      const key = makeMeshEdgeKey(vertexId, nextVertexId);
+      const normals = edgeNormals.get(key) ?? [];
+
+      normals.push(handle.normal);
+      edgeNormals.set(key, normals);
+    });
+  });
+
+  const edgeHandles = createMeshEditHandles(mesh, "edge").flatMap((handle) => {
+    const normals = edgeNormals.get(handle.id);
+
+    // Valid edge extrusion supports manifold edges with one or two incident faces.
+    if (!normals || normals.length === 0 || normals.length > 2) {
+      return [];
+    }
+
+    return [
+      {
+        ...handle,
+        kind: "edge" as const,
+        normal: normalizeVec3(averageVec3(normals))
+      }
+    ];
+  });
+
+  return [...faceExtrudeHandles, ...edgeHandles];
+}
+
+export function collectMeshEdgeLoop(mesh: EditableMesh, edge: [string, string]) {
+  const facesById = new Map(mesh.faces.map((face) => [face.id, getFaceVertexIds(mesh, face.id)]));
+  const visited = new Set<string>();
+  const loop: Array<[string, string]> = [];
+  const adjacentFaces = Array.from(facesById.entries())
+    .filter(([, vertexIds]) => findLoopEdgeIndex(vertexIds, edge) >= 0)
+    .map(([faceId]) => faceId);
+
+  const visitEdge = (candidate: [string, string]) => {
+    const key = makeMeshEdgeKey(candidate[0], candidate[1]);
+
+    if (visited.has(key)) {
+      return false;
+    }
+
+    visited.add(key);
+    loop.push(candidate[0] < candidate[1] ? candidate : [candidate[1], candidate[0]]);
+    return true;
+  };
+
+  const traverse = (faceId: string, incomingEdge: [string, string]) => {
+    const vertexIds = facesById.get(faceId);
+
+    if (!vertexIds || vertexIds.length < 4 || vertexIds.length % 2 !== 0) {
+      return;
+    }
+
+    const edgeIndex = findLoopEdgeIndex(vertexIds, incomingEdge);
+
+    if (edgeIndex < 0) {
+      return;
+    }
+
+    const oppositeIndex = (edgeIndex + vertexIds.length / 2) % vertexIds.length;
+    const oppositeEdge: [string, string] = [
+      vertexIds[oppositeIndex],
+      vertexIds[(oppositeIndex + 1) % vertexIds.length]
+    ];
+
+    if (!visitEdge(oppositeEdge)) {
+      return;
+    }
+
+    const nextFaceId = Array.from(facesById.entries()).find(
+      ([candidateFaceId, candidateVertexIds]) =>
+        candidateFaceId !== faceId && findLoopEdgeIndex(candidateVertexIds, oppositeEdge) >= 0
+    )?.[0];
+
+    if (nextFaceId) {
+      traverse(nextFaceId, oppositeEdge);
+    }
+  };
+
+  visitEdge(edge);
+  adjacentFaces.forEach((faceId) => {
+    traverse(faceId, edge);
+  });
+
+  return loop;
 }
 
 export function extrudeBrushHandle(
@@ -694,6 +788,17 @@ function computeBrushExtrusionNormal(faces: ReconstructedBrushFace[], faceIds: s
   }
 
   return normalizeVec3(averageVec3(normals));
+}
+
+function makeMeshEdgeKey(left: string, right: string) {
+  return left < right ? `${left}:${right}` : `${right}:${left}`;
+}
+
+function findLoopEdgeIndex(vertexIds: string[], edge: [string, string]) {
+  return vertexIds.findIndex((vertexId, index) => {
+    const nextVertexId = vertexIds[(index + 1) % vertexIds.length];
+    return makeMeshEdgeKey(vertexId, nextVertexId) === makeMeshEdgeKey(edge[0], edge[1]);
+  });
 }
 
 function collectHullPlaneGroups(hull: ConvexHull, epsilon: number) {

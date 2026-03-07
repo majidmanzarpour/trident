@@ -5,6 +5,7 @@ import {
   crossVec3,
   dotVec3,
   normalizeVec3,
+  snapValue,
   scaleVec3,
   subVec3,
   vec3
@@ -33,6 +34,23 @@ type OrientedEditablePolygon = {
   positions: Vec3[];
   expectedNormal?: Vec3;
   vertexIds?: VertexID[];
+};
+
+type FacePlanePoint = {
+  u: number;
+  v: number;
+};
+
+type ResolvedFaceCut = {
+  end: Vec3;
+  firstEdge: [VertexID, VertexID];
+  firstEdgeIndex: number;
+  firstPoint: Vec3;
+  secondEdge: [VertexID, VertexID];
+  secondEdgeIndex: number;
+  secondPoint: Vec3;
+  start: Vec3;
+  target: MeshPolygonData;
 };
 
 export function convertBrushToEditableMesh(brush: Brush): EditableMesh | undefined {
@@ -223,6 +241,99 @@ export function cutEditableMeshBetweenEdges(
   );
 
   return createEditableMeshFromPolygons(nextPolygons);
+}
+
+export function buildEditableMeshFaceCutPreview(
+  mesh: EditableMesh,
+  faceId: FaceID,
+  point: Vec3,
+  snapSize: number,
+  epsilon = 0.0001
+): { end: Vec3; start: Vec3 } | undefined {
+  const resolvedCut = resolveEditableMeshFaceCut(mesh, faceId, point, snapSize, epsilon);
+
+  if (!resolvedCut) {
+    return undefined;
+  }
+
+  return {
+    end: resolvedCut.end,
+    start: resolvedCut.start
+  };
+}
+
+export function cutEditableMeshFace(
+  mesh: EditableMesh,
+  faceId: FaceID,
+  point: Vec3,
+  snapSize: number,
+  epsilon = 0.0001
+): EditableMesh | undefined {
+  const resolvedCut = resolveEditableMeshFaceCut(mesh, faceId, point, snapSize, epsilon);
+
+  if (!resolvedCut) {
+    return undefined;
+  }
+
+  const expanded = expandPolygonWithInsertedMidpoints(resolvedCut.target, [
+    {
+      edgeIndex: resolvedCut.firstEdgeIndex,
+      id: "__cut_a__",
+      position: resolvedCut.firstPoint
+    },
+    {
+      edgeIndex: resolvedCut.secondEdgeIndex,
+      id: "__cut_b__",
+      position: resolvedCut.secondPoint
+    }
+  ]);
+  const cutAIndex = expanded.vertexIds.indexOf("__cut_a__");
+  const cutBIndex = expanded.vertexIds.indexOf("__cut_b__");
+
+  if (cutAIndex < 0 || cutBIndex < 0) {
+    return undefined;
+  }
+
+  const firstPolygon = ringSlice(expanded.positions, cutAIndex, cutBIndex);
+  const secondPolygon = ringSlice(expanded.positions, cutBIndex, cutAIndex);
+
+  if (firstPolygon.length < 3 || secondPolygon.length < 3) {
+    return undefined;
+  }
+
+  const nextPolygons: OrientedEditablePolygon[] = getMeshPolygons(mesh)
+    .filter((polygon) => polygon.id !== resolvedCut.target.id)
+    .map((polygon) => {
+      const containsFirstEdge = findEdgeIndex(polygon.vertexIds, resolvedCut.firstEdge) >= 0;
+      const containsSecondEdge = findEdgeIndex(polygon.vertexIds, resolvedCut.secondEdge) >= 0;
+      const firstPassPolygon = containsFirstEdge
+        ? getMeshPolygonWithInsertedPoint(polygon, resolvedCut.firstEdge, resolvedCut.firstPoint)
+        : polygon;
+      const secondPassPolygon = containsSecondEdge
+        ? getMeshPolygonWithInsertedPoint(firstPassPolygon, resolvedCut.secondEdge, resolvedCut.secondPoint)
+        : firstPassPolygon;
+
+      return {
+        expectedNormal: polygon.normal,
+        id: secondPassPolygon.id,
+        positions: secondPassPolygon.positions.map((position) => vec3(position.x, position.y, position.z))
+      };
+    });
+
+  nextPolygons.push(
+    {
+      expectedNormal: resolvedCut.target.normal,
+      id: `${resolvedCut.target.id}:cut:1`,
+      positions: firstPolygon
+    },
+    {
+      expectedNormal: resolvedCut.target.normal,
+      id: `${resolvedCut.target.id}:cut:2`,
+      positions: secondPolygon
+    }
+  );
+
+  return createEditableMeshFromPolygons(orientPolygonLoops(nextPolygons));
 }
 
 export function bevelEditableMeshEdge(
@@ -430,13 +541,109 @@ export function extrudeEditableMeshEdge(
   mesh: EditableMesh,
   edge: [VertexID, VertexID],
   amount: number,
+  overrideNormal?: Vec3,
   epsilon = 0.0001
 ): EditableMesh | undefined {
   if (amount <= epsilon) {
     return structuredClone(mesh);
   }
 
-  return undefined;
+  const polygons = getMeshPolygons(mesh);
+  const adjacent = polygons.filter((polygon) => findEdgeIndex(polygon.vertexIds, edge) >= 0);
+
+  if (adjacent.length === 0 || adjacent.length > 2) {
+    return undefined;
+  }
+
+  const [target] = adjacent;
+  const edgeIndex = findEdgeIndex(target.vertexIds, edge);
+
+  if (edgeIndex < 0) {
+    return undefined;
+  }
+
+  const nextIndex = (edgeIndex + 1) % target.vertexIds.length;
+  const orientedEdge: [VertexID, VertexID] = [
+    target.vertexIds[edgeIndex],
+    target.vertexIds[nextIndex]
+  ];
+  const startPosition = target.positions[edgeIndex];
+  const endPosition = target.positions[nextIndex];
+  const extrusionNormal = normalizeVec3(overrideNormal ?? averageVec3(adjacent.map((polygon) => polygon.normal)));
+
+  if (Math.abs(extrusionNormal.x) <= epsilon && Math.abs(extrusionNormal.y) <= epsilon && Math.abs(extrusionNormal.z) <= epsilon) {
+    return undefined;
+  }
+
+  const offset = scaleVec3(extrusionNormal, amount);
+  const extrudedStart = addVec3(startPosition, offset);
+  const extrudedEnd = addVec3(endPosition, offset);
+  const edgeKey = makeUndirectedEdgeKey(edge[0], edge[1]);
+  const extrudedStartId = `extrude:${edgeKey}:start`;
+  const extrudedEndId = `extrude:${edgeKey}:end`;
+  const nextPolygons: OrientedEditablePolygon[] = polygons
+    .map((polygon) => ({
+      expectedNormal: polygon.normal,
+      id: polygon.id,
+      positions: polygon.positions.map((position) => vec3(position.x, position.y, position.z)),
+      vertexIds: [...polygon.vertexIds]
+    }));
+
+  if (adjacent.length === 2) {
+    adjacent.forEach((polygon, polygonIndex) => {
+      const polygonEdgeIndex = findEdgeIndex(polygon.vertexIds, orientedEdge);
+
+      if (polygonEdgeIndex < 0) {
+        return;
+      }
+
+      const polygonNextIndex = (polygonEdgeIndex + 1) % polygon.vertexIds.length;
+      const localStartId = polygon.vertexIds[polygonEdgeIndex];
+      const localEndId = polygon.vertexIds[polygonNextIndex];
+      const localStartExtruded = localStartId === orientedEdge[0] ? extrudedStart : extrudedEnd;
+      const localEndExtruded = localEndId === orientedEdge[1] ? extrudedEnd : extrudedStart;
+      const localStartExtrudedId = localStartId === orientedEdge[0] ? extrudedStartId : extrudedEndId;
+      const localEndExtrudedId = localEndId === orientedEdge[1] ? extrudedEndId : extrudedStartId;
+
+      nextPolygons.push(
+        {
+          id: `${polygon.id}:extrude:side:${polygonIndex}`,
+          positions: [
+            polygon.positions[polygonEdgeIndex],
+            polygon.positions[polygonNextIndex],
+            localEndExtruded,
+            localStartExtruded
+          ],
+          vertexIds: [
+            `${polygon.id}:extrude:${edgeKey}:start`,
+            `${polygon.id}:extrude:${edgeKey}:end`,
+            localEndExtrudedId,
+            localStartExtrudedId
+          ]
+        }
+      );
+    });
+
+    return createEditableMeshFromPolygons(orientPolygonLoops(nextPolygons));
+  }
+
+  nextPolygons.push({
+    id: `${target.id}:extrude:${edgeKey}`,
+    positions: [
+      vec3(startPosition.x, startPosition.y, startPosition.z),
+      vec3(endPosition.x, endPosition.y, endPosition.z),
+      vec3(extrudedEnd.x, extrudedEnd.y, extrudedEnd.z),
+      vec3(extrudedStart.x, extrudedStart.y, extrudedStart.z)
+    ],
+    vertexIds: [
+      orientedEdge[0],
+      orientedEdge[1],
+      extrudedEndId,
+      extrudedStartId
+    ]
+  });
+
+  return createEditableMeshFromPolygons(orientPolygonLoops(nextPolygons));
 }
 
 export function inflateEditableMesh(mesh: EditableMesh, factor: number): EditableMesh {
@@ -554,6 +761,131 @@ function areAdjacentEdgeIndices(length: number, left: number, right: number) {
 
 function midpoint(left: Vec3, right: Vec3) {
   return vec3((left.x + right.x) * 0.5, (left.y + right.y) * 0.5, (left.z + right.z) * 0.5);
+}
+
+function resolveEditableMeshFaceCut(
+  mesh: EditableMesh,
+  faceId: FaceID,
+  point: Vec3,
+  snapSize: number,
+  epsilon: number
+): ResolvedFaceCut | undefined {
+  const target = getMeshPolygons(mesh).find((polygon) => polygon.id === faceId);
+
+  if (!target || target.positions.length < 3) {
+    return undefined;
+  }
+
+  const basis = createFacePlaneBasis(target.normal);
+  const projectedPoint = projectFacePoint(point, target.center, basis);
+  const axis = Math.abs(projectedPoint.u) >= Math.abs(projectedPoint.v) ? "u" : "v";
+  const otherAxis = axis === "u" ? "v" : "u";
+  const coordinate = snapValue(projectedPoint[axis], snapSize);
+  const projectedPositions = target.positions.map((position) => projectFacePoint(position, target.center, basis));
+  const bounds = projectedPositions.reduce(
+    (current, candidate) => ({
+      max: Math.max(current.max, candidate[axis]),
+      min: Math.min(current.min, candidate[axis])
+    }),
+    {
+      max: Number.NEGATIVE_INFINITY,
+      min: Number.POSITIVE_INFINITY
+    }
+  );
+
+  if (coordinate <= bounds.min + epsilon || coordinate >= bounds.max - epsilon) {
+    return undefined;
+  }
+
+  const intersections = projectedPositions
+    .map((position, edgeIndex) => {
+      const nextIndex = (edgeIndex + 1) % projectedPositions.length;
+      const next = projectedPositions[nextIndex];
+      const delta = next[axis] - position[axis];
+
+      if (Math.abs(delta) <= epsilon) {
+        return undefined;
+      }
+
+      const t = (coordinate - position[axis]) / delta;
+
+      if (t <= epsilon || t >= 1 - epsilon) {
+        return undefined;
+      }
+
+      if (coordinate < Math.min(position[axis], next[axis]) - epsilon || coordinate > Math.max(position[axis], next[axis]) + epsilon) {
+        return undefined;
+      }
+
+      return {
+        edge: [target.vertexIds[edgeIndex], target.vertexIds[nextIndex]] as [VertexID, VertexID],
+        edgeIndex,
+        point: lerpVec3(target.positions[edgeIndex], target.positions[nextIndex], t),
+        projected: {
+          [axis]: coordinate,
+          [otherAxis]: position[otherAxis] + (next[otherAxis] - position[otherAxis]) * t
+        } as FacePlanePoint
+      };
+    })
+    .filter(
+      (
+        intersection
+      ): intersection is {
+        edge: [VertexID, VertexID];
+        edgeIndex: number;
+        point: Vec3;
+        projected: FacePlanePoint;
+      } => Boolean(intersection)
+    )
+    .filter(
+      (intersection, index, collection) =>
+        collection.findIndex(
+          (candidate) =>
+            candidate.edgeIndex === intersection.edgeIndex ||
+            (
+              Math.abs(candidate.point.x - intersection.point.x) <= epsilon &&
+              Math.abs(candidate.point.y - intersection.point.y) <= epsilon &&
+              Math.abs(candidate.point.z - intersection.point.z) <= epsilon
+            )
+        ) === index
+    )
+    .sort((left, right) => left.projected[otherAxis] - right.projected[otherAxis]);
+
+  if (intersections.length !== 2) {
+    return undefined;
+  }
+
+  const [firstIntersection, secondIntersection] = intersections;
+
+  return {
+    end: secondIntersection.point,
+    firstEdge: firstIntersection.edge,
+    firstEdgeIndex: firstIntersection.edgeIndex,
+    firstPoint: firstIntersection.point,
+    secondEdge: secondIntersection.edge,
+    secondEdgeIndex: secondIntersection.edgeIndex,
+    secondPoint: secondIntersection.point,
+    start: firstIntersection.point,
+    target
+  };
+}
+
+function createFacePlaneBasis(normal: Vec3) {
+  const normalizedNormal = normalizeVec3(normal);
+  const reference = Math.abs(normalizedNormal.y) < 0.99 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+  const u = normalizeVec3(crossVec3(reference, normalizedNormal));
+  const v = normalizeVec3(crossVec3(normalizedNormal, u));
+
+  return { u, v };
+}
+
+function projectFacePoint(point: Vec3, origin: Vec3, basis: { u: Vec3; v: Vec3 }): FacePlanePoint {
+  const offset = subVec3(point, origin);
+
+  return {
+    u: dotVec3(offset, basis.u),
+    v: dotVec3(offset, basis.v)
+  };
 }
 
 function expandPolygonWithInsertedMidpoints(
@@ -735,7 +1067,8 @@ function orientPolygonLoops(polygons: OrientedEditablePolygon[]) {
     if (polygon.expectedNormal && dotVec3(normal, polygon.expectedNormal) < 0) {
       return {
         ...polygon,
-        positions: polygon.positions.slice().reverse()
+        positions: polygon.positions.slice().reverse(),
+        vertexIds: polygon.vertexIds?.slice().reverse()
       };
     }
 
@@ -745,7 +1078,8 @@ function orientPolygonLoops(polygons: OrientedEditablePolygon[]) {
       ? polygon
       : {
           ...polygon,
-          positions: polygon.positions.slice().reverse()
+          positions: polygon.positions.slice().reverse(),
+          vertexIds: polygon.vertexIds?.slice().reverse()
         };
   });
 }
