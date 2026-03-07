@@ -33,13 +33,14 @@ export function ObjectTransformGizmo({
   const selectedObject = selectedNodeId ? scene.getObjectByName(`node:${selectedNodeId}`) : undefined;
   const snapSize = resolveViewportSnapSize(viewport);
   const activePivotNode = activePivotNodeId ? selectedNodes.find((node) => node.id === activePivotNodeId) : undefined;
+  const pivotEditingEnabled = activeToolId === "transform" || activeToolId === "mesh-edit";
 
   useEffect(() => {
-    if (activeToolId !== "transform") {
+    if (!pivotEditingEnabled) {
       setActivePivotNodeId(undefined);
       baselineTransformRef.current = undefined;
     }
-  }, [activeToolId]);
+  }, [pivotEditingEnabled]);
 
   useEffect(() => {
     if (activePivotNodeId && !selectedNodes.some((node) => node.id === activePivotNodeId)) {
@@ -48,12 +49,13 @@ export function ObjectTransformGizmo({
     }
   }, [activePivotNodeId, selectedNodes]);
 
-  if (activeToolId !== "transform") {
+  if (!pivotEditingEnabled) {
     return null;
   }
 
   const pivot = selectedNode ? resolveTransformPivot(selectedNode.transform) : vec3(0, 0, 0);
-  const showObjectTransformGizmo = !activePivotNode && Boolean(selectedNodeId && selectedObject && selectedNode);
+  const showObjectTransformGizmo =
+    activeToolId === "transform" && !activePivotNode && Boolean(selectedNodeId && selectedObject && selectedNode);
 
   return (
     <>
