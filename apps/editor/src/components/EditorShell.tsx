@@ -22,6 +22,7 @@ type EditorShellProps = {
   meshEditMode: MeshEditMode;
   onAssignMaterial: (materialId: string) => void;
   onClipSelection: (axis: TransformAxis) => void;
+  onCommitMeshTopology: (nodeId: string, mesh: EditableMesh) => void;
   onCreateBrush: () => void;
   onDeleteSelection: () => void;
   onDuplicateSelection: () => void;
@@ -72,6 +73,7 @@ export function EditorShell({
   meshEditMode,
   onAssignMaterial,
   onClipSelection,
+  onCommitMeshTopology,
   onCreateBrush,
   onDeleteSelection,
   onDuplicateSelection,
@@ -146,6 +148,7 @@ export function EditorShell({
           activeToolId={activeToolId}
           meshEditMode={meshEditMode}
           onClearSelection={onClearSelection}
+          onCommitMeshTopology={onCommitMeshTopology}
           onFocusNode={onFocusNode}
           onPlaceAsset={onPlaceAsset}
           onPlaceBrush={onPlaceBrush}

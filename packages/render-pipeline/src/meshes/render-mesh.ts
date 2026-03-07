@@ -110,7 +110,7 @@ function getRenderAppearance(
     return {
       color: "#6ed5c0",
       flatShaded: true,
-      wireframe: true,
+      wireframe: false,
       primitiveLabel: "poly"
     };
   }

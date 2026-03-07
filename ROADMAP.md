@@ -49,6 +49,17 @@ Last updated: 2026-03-07
 - Removed the remaining drag-loop instability by letting the hidden gizmo target stay fully imperative during active drags and by freezing brush subobject handle topology at drag start, so preview rerenders no longer reset the control object or swap the selected baseline under the solver mid-gesture.
 - Added real brush authoring entry points so new blockout brushes can be placed into the scene from the menu bar or scene panel instead of working only from the seeded demo brush.
 - Expanded the in-canvas brush extrude tool from axis-aligned face offsetting to convex brush feature extrusion, including direct-drag edge extrusion handles alongside face extrusion handles.
+- Added selection deletion as a real undoable editor command and wired `Delete` / `Backspace` plus the Edit menu to remove the current selection.
+- Added a dedicated brush authoring tool with staged three-click box creation: click to anchor on a hit surface, click again to lock the base plane, click a third time to commit the extrusion, and `Escape` to cancel before placement.
+- Expanded `Mesh Edit` topology operations with normal inversion on `N`, brush face deletion, two-edge cuts, adjacent-face merge on `M`, and interactive edge bevel on `B` with mouse-width control plus wheel-driven step count; topology-changing brush edits now promote the brush to an editable mesh on commit.
+- Fixed promoted brush rendering so topology-edited brushes display as solid front-faced geometry instead of the old mesh wireframe fallback, making invert/cut/merge results render like authored surfaces instead of debug output.
+- Refined edge beveling into a signed profile-aware operation: drag width can now go inward or outward, flat bevel is the default for architectural cuts, wheel adjusts segments, and `F` toggles between flat and round bevel profiles while the bevel gesture is active.
+- Fixed delete-key precedence so `Delete` / `Backspace` in `Mesh Edit` no longer removes the whole selected object before subobject face deletion can run.
+- Fixed `K` edge cuts so they split the selected source edges across all incident faces instead of only dividing the picked face, eliminating the old surviving-edge / T-junction topology bug.
+- Fixed bevel preview readability by hiding the source object during the bevel gesture, rendering the preview with a distinct overlay material, and adding a visible wire overlay so segment counts are readable while dragging.
+- Fixed edge bevel retopology for cube-style corner cases by rewriting the endpoint faces that share the beveled vertices, so adjacent cap faces no longer keep stale corner topology, and normalized the rebuilt polygon winding so bevel results stop mixing inward- and outward-facing normals.
+- Corrected bevel endpoint-face stitching to use actual local edge-to-face adjacency instead of the previous vertex-membership heuristic, which fixes vertical and horizontal cube-edge bevels connecting to the wrong side of the strip or leaving cap faces detached from the new bevel.
+- Suspended the normal mesh-edit gizmos during active bevel gestures and made the bevel cursor overlay non-blocking, so orbit controls recover immediately after bevel commit/cancel instead of staying frozen until the user leaves `Mesh Edit`.
 
 ## Next
 
@@ -59,7 +70,7 @@ Last updated: 2026-03-07
 - Phase 7: add brush editing operations such as clip, split, hollow, merge, and face extrusion.
   Current gap: clipping and extrusion now work for axis-aligned box brushes in-canvas, but arbitrary-plane clipping, hollow/merge flows, and non-box brush editing are still missing.
 - Phase 8: add mesh editing tools such as extrude, bevel, split edge, loop cut, and merge vertices.
-  Current gap: vertex/edge/face subobject selection and full translate/rotate/scale editing now work for editable meshes and convex brush subobjects, but topology-changing operations like bevel, loop cut, split edge, face extrude, weld, and deeper validation/polish for arbitrary brush edits are still missing.
+  Current gap: vertex/edge/face subobject selection and full translate/rotate/scale editing now work for editable meshes and convex brush subobjects, and the first topology-changing ops are in place with flat/round edge beveling, but face extrude polish, weld/merge-vertex tools, dedicated split-edge/loop-cut UX, and deeper validation/polish for arbitrary brush edits are still missing.
 - Phase 9: add materials, assets, entity authoring, and worker-backed async jobs.
   Current gap: richer asset catalogs, direct entity selection/editing, and real worker-backed geometry/nav rebuild jobs are still missing; only export/persistence currently runs in a real Web Worker.
 - Phase 10: implement `.whmap` persistence plus GLTF and engine export flows.

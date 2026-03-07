@@ -43,6 +43,7 @@
 
 * {
   box-sizing: border-box;
+  @apply ring-0;
 }
 
 html,

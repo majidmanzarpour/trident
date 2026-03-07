@@ -7,6 +7,7 @@ import {
   createExtrudeBrushNodesCommand,
   createDuplicateNodesCommand,
   createEditorCore,
+  createReplaceNodesCommand,
   createSetBrushDataCommand,
   createSetMeshDataCommand,
   type SceneDocumentSnapshot,
@@ -23,12 +24,15 @@ import {
   createTranslateNodesCommand,
   type TransformAxis
 } from "@web-hammer/editor-core";
+import { convertBrushToEditableMesh, invertEditableMeshNormals } from "@web-hammer/geometry-kernel";
 import { deriveRenderScene, gridSnapValues } from "@web-hammer/render-pipeline";
 import {
   addVec3,
+  type GeometryNode,
   isBrushNode,
   isMeshNode,
   makeTransform,
+  type MeshNode,
   snapVec3,
   subVec3,
   vec3,
@@ -410,6 +414,73 @@ export function App() {
     enqueueWorkerJob("Brush creation", { task: "brush-rebuild", worker: "geometryWorker" }, 700);
   };
 
+  const handleCommitMeshTopology = (nodeId: string, mesh: EditableMesh) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node) {
+      return;
+    }
+
+    if (isMeshNode(node)) {
+      editor.execute(createSetMeshDataCommand(editor.scene, nodeId, mesh, node.data));
+    } else if (isBrushNode(node)) {
+      const replacement: MeshNode = {
+        id: node.id,
+        kind: "mesh",
+        name: node.name,
+        transform: structuredClone(node.transform),
+        data: structuredClone(mesh)
+      };
+
+      editor.execute(createReplaceNodesCommand(editor.scene, [replacement], "promote brush to mesh"));
+    }
+
+    enqueueWorkerJob("Topology edit", { task: "triangulation", worker: "meshWorker" }, 850);
+  };
+
+  const handleInvertSelectionNormals = () => {
+    const replacements: GeometryNode[] = editor.selection.ids
+      .map((nodeId) => editor.scene.getNode(nodeId))
+      .filter((node): node is GeometryNode => Boolean(node))
+      .flatMap((node) => {
+        if (isMeshNode(node)) {
+          return [
+            {
+              ...structuredClone(node),
+              data: invertEditableMeshNormals(node.data)
+            } satisfies MeshNode
+          ];
+        }
+
+        if (isBrushNode(node)) {
+          const converted = convertBrushToEditableMesh(node.data);
+
+          if (!converted) {
+            return [];
+          }
+
+          return [
+            {
+              id: node.id,
+              kind: "mesh" as const,
+              name: node.name,
+              transform: structuredClone(node.transform),
+              data: invertEditableMeshNormals(converted)
+            } satisfies MeshNode
+          ];
+        }
+
+        return [];
+      });
+
+    if (replacements.length === 0) {
+      return;
+    }
+
+    editor.execute(createReplaceNodesCommand(editor.scene, replacements, "invert normals"));
+    enqueueWorkerJob("Invert normals", { task: "triangulation", worker: "meshWorker" }, 650);
+  };
+
   const handleAssignMaterial = (materialId: string) => {
     if (editor.selection.ids.length === 0) {
       return;
@@ -601,9 +672,15 @@ export function App() {
         return;
       }
 
-      if (event.key === "Backspace" || event.key === "Delete") {
+      if ((event.key === "Backspace" || event.key === "Delete") && activeToolId !== "mesh-edit") {
         event.preventDefault();
         handleDeleteSelection();
+        return;
+      }
+
+      if (event.key.toLowerCase() === "n" && activeToolId !== "mesh-edit") {
+        event.preventDefault();
+        handleInvertSelectionNormals();
         return;
       }
 
@@ -642,7 +719,7 @@ export function App() {
         return;
       }
 
-      if (event.key.toLowerCase() === "b") {
+      if (event.key.toLowerCase() === "b" && activeToolId !== "mesh-edit") {
         handleSetToolId("brush");
         return;
       }
@@ -731,6 +808,7 @@ export function App() {
         onDeleteSelection={handleDeleteSelection}
         onDuplicateSelection={handleDuplicateSelection}
         onClearSelection={handleClearSelection}
+        onCommitMeshTopology={handleCommitMeshTopology}
         onExportEngine={handleExportEngine}
         onExportGltf={handleExportGltf}
         onExtrudeSelection={handleExtrudeSelection}

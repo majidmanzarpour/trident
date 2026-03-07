@@ -249,6 +249,43 @@ export function createDeleteSelectionCommand(scene: SceneDocument, ids: string[]
   };
 }
 
+export function createReplaceNodesCommand(
+  scene: SceneDocument,
+  nextNodes: GeometryNode[],
+  label = "replace nodes"
+): Command {
+  const snapshots = nextNodes
+    .map((nextNode) => {
+      const before = scene.getNode(nextNode.id);
+
+      if (!before) {
+        return undefined;
+      }
+
+      return {
+        before: structuredClone(before),
+        next: structuredClone(nextNode)
+      };
+    })
+    .filter((snapshot): snapshot is { before: GeometryNode; next: GeometryNode } => Boolean(snapshot));
+
+  return {
+    label,
+    execute(nextScene) {
+      snapshots.forEach((snapshot) => {
+        nextScene.nodes.set(snapshot.next.id, structuredClone(snapshot.next));
+        nextScene.touch();
+      });
+    },
+    undo(nextScene) {
+      snapshots.forEach((snapshot) => {
+        nextScene.nodes.set(snapshot.before.id, structuredClone(snapshot.before));
+        nextScene.touch();
+      });
+    }
+  };
+}
+
 export function createSplitBrushNodesCommand(
   scene: SceneDocument,
   nodeIds: string[],
