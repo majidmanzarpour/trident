@@ -11,9 +11,15 @@ import {
   Square,
   Trash2,
   Unlock,
-  X
+  X,
 } from "lucide-react";
-import { createBlockoutTextureDataUri, vec2, type GeometryNode, type Material, type Vec2 } from "@web-hammer/shared";
+import {
+  createBlockoutTextureDataUri,
+  vec2,
+  type GeometryNode,
+  type Material,
+  type Vec2,
+} from "@web-hammer/shared";
 import { Button } from "@/components/ui/button";
 import { DragInput } from "@/components/ui/drag-input";
 import { Input } from "@/components/ui/input";
@@ -22,10 +28,18 @@ import { cn } from "@/lib/utils";
 
 type MaterialLibraryPanelProps = {
   materials: Material[];
-  onApplyMaterial: (materialId: string, scope: "faces" | "object", faceIds: string[]) => void;
+  onApplyMaterial: (
+    materialId: string,
+    scope: "faces" | "object",
+    faceIds: string[],
+  ) => void;
   onDeleteMaterial: (materialId: string) => void;
   onSelectMaterial: (materialId: string) => void;
-  onSetUvScale: (scope: "faces" | "object", faceIds: string[], uvScale: Vec2) => void;
+  onSetUvScale: (
+    scope: "faces" | "object",
+    faceIds: string[],
+    uvScale: Vec2,
+  ) => void;
   onUpsertMaterial: (material: Material) => void;
   selectedFaceIds: string[];
   selectedMaterialId: string;
@@ -36,7 +50,7 @@ const TEXTURE_FIELDS = [
   { field: "colorTexture", label: "Color Texture" },
   { field: "normalTexture", label: "Normal Map" },
   { field: "metalnessTexture", label: "Metalness Map" },
-  { field: "roughnessTexture", label: "Roughness Map" }
+  { field: "roughnessTexture", label: "Roughness Map" },
 ] as const;
 
 export function MaterialLibraryPanel({
@@ -48,33 +62,62 @@ export function MaterialLibraryPanel({
   onUpsertMaterial,
   selectedFaceIds,
   selectedMaterialId,
-  selectedNode
+  selectedNode,
 }: MaterialLibraryPanelProps) {
   const selectedMaterial = useMemo(
     () => materials.find((material) => material.id === selectedMaterialId),
-    [materials, selectedMaterialId]
+    [materials, selectedMaterialId],
   );
-  const flatMaterials = useMemo(() => materials.filter((material) => resolveMaterialCategory(material) === "flat"), [materials]);
+  const flatMaterials = useMemo(
+    () =>
+      materials.filter(
+        (material) => resolveMaterialCategory(material) === "flat",
+      ),
+    [materials],
+  );
   const blockoutMaterials = useMemo(
-    () => materials.filter((material) => resolveMaterialCategory(material) === "blockout"),
-    [materials]
+    () =>
+      materials.filter(
+        (material) => resolveMaterialCategory(material) === "blockout",
+      ),
+    [materials],
   );
-  const customMaterials = useMemo(() => materials.filter((material) => resolveMaterialCategory(material) === "custom"), [materials]);
-  const [draftMaterial, setDraftMaterial] = useState<Material>(() => createDraftMaterial(selectedMaterial));
-  const [expandedMaterialId, setExpandedMaterialId] = useState<string | "new" | null>(null);
+  const customMaterials = useMemo(
+    () =>
+      materials.filter(
+        (material) => resolveMaterialCategory(material) === "custom",
+      ),
+    [materials],
+  );
+  const [draftMaterial, setDraftMaterial] = useState<Material>(() =>
+    createDraftMaterial(selectedMaterial),
+  );
+  const [expandedMaterialId, setExpandedMaterialId] = useState<
+    string | "new" | null
+  >(null);
   const [scope, setScope] = useState<"faces" | "object">("object");
   const [uvDraft, setUvDraft] = useState<Vec2>(() => vec2(1, 1));
   const [uvLocked, setUvLocked] = useState(true);
   const fileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
-  const materialFaces = selectedNode && (selectedNode.kind === "brush" || selectedNode.kind === "mesh") ? selectedNode.data.faces : [];
-  const faceSelectionSet = useMemo(() => new Set(selectedFaceIds), [selectedFaceIds]);
+  const materialFaces =
+    selectedNode &&
+    (selectedNode.kind === "brush" || selectedNode.kind === "mesh")
+      ? selectedNode.data.faces
+      : [];
+  const faceSelectionSet = useMemo(
+    () => new Set(selectedFaceIds),
+    [selectedFaceIds],
+  );
   const selectedFaces = useMemo(
     () => materialFaces.filter((face) => faceSelectionSet.has(face.id)),
-    [faceSelectionSet, materialFaces]
+    [faceSelectionSet, materialFaces],
   );
-  const canApplyToObject = selectedNode?.kind === "brush" || selectedNode?.kind === "mesh";
+  const canApplyToObject =
+    selectedNode?.kind === "brush" || selectedNode?.kind === "mesh";
   const canApplyToFaces = canApplyToObject && selectedFaceIds.length > 0;
-  const targetUvScale = (canApplyToFaces ? selectedFaces[0]?.uvScale : materialFaces[0]?.uvScale) ?? vec2(1, 1);
+  const targetUvScale =
+    (canApplyToFaces ? selectedFaces[0]?.uvScale : materialFaces[0]?.uvScale) ??
+    vec2(1, 1);
 
   useEffect(() => {
     setDraftMaterial(createDraftMaterial(selectedMaterial));
@@ -94,7 +137,12 @@ export function MaterialLibraryPanel({
 
   useEffect(() => {
     setUvDraft(vec2(targetUvScale.x, targetUvScale.y));
-  }, [targetUvScale.x, targetUvScale.y, selectedNode?.id, selectedFaceIds.join("|")]);
+  }, [
+    targetUvScale.x,
+    targetUvScale.y,
+    selectedNode?.id,
+    selectedFaceIds.join("|"),
+  ]);
 
   const applyUvAxis = (axis: "x" | "y", value: number) => {
     setUvDraft((current) => {
@@ -106,15 +154,19 @@ export function MaterialLibraryPanel({
     });
   };
 
-  const resolvedScope = scope === "faces" && canApplyToFaces ? "faces" : "object";
+  const resolvedScope =
+    scope === "faces" && canApplyToFaces ? "faces" : "object";
   const resolvedFaceIds = resolvedScope === "faces" ? selectedFaceIds : [];
-  const canApply = Boolean(selectedMaterial) && canApplyToObject && (resolvedScope === "object" || canApplyToFaces);
+  const canApply =
+    Boolean(selectedMaterial) &&
+    canApplyToObject &&
+    (resolvedScope === "object" || canApplyToFaces);
 
   const saveAsNewMaterial = () => {
     const material = {
       ...draftMaterial,
       category: "custom" as const,
-      id: createCustomMaterialId(draftMaterial.name)
+      id: createCustomMaterialId(draftMaterial.name),
     };
 
     onUpsertMaterial(material);
@@ -127,7 +179,7 @@ export function MaterialLibraryPanel({
       const material = {
         ...draftMaterial,
         category: "custom" as const,
-        id: createCustomMaterialId(draftMaterial.name)
+        id: createCustomMaterialId(draftMaterial.name),
       };
 
       onUpsertMaterial(material);
@@ -136,14 +188,18 @@ export function MaterialLibraryPanel({
       return;
     }
 
-    if (!selectedMaterial || resolveMaterialCategory(selectedMaterial) !== "custom" || !expandedMaterialId) {
+    if (
+      !selectedMaterial ||
+      resolveMaterialCategory(selectedMaterial) !== "custom" ||
+      !expandedMaterialId
+    ) {
       return;
     }
 
     onUpsertMaterial({
       ...draftMaterial,
       category: "custom",
-      id: expandedMaterialId
+      id: expandedMaterialId,
     });
   };
 
@@ -168,38 +224,34 @@ export function MaterialLibraryPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-[#0b1512]/96 px-1 pb-3 backdrop-blur-xl">
-        <div className="flex items-center gap-1 rounded-2xl bg-white/5 p-1">
+    <div className="flex h-full w-full min-h-0 flex-col overflow-hidden">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-1 pb-3 backdrop-blur-xl">
+        <div className="grid grid-cols-2 w-full justify-center items-center gap-1 rounded-2xl bg-white/5 p-1">
           <button
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-[11px] font-medium text-foreground/56 transition-colors",
-              resolvedScope === "object" && "bg-white/10 text-foreground"
+              "inline-flex h-8 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium text-foreground/56 transition-colors",
+              resolvedScope === "object" && "bg-white/5 text-foreground",
             )}
             onClick={() => setScope("object")}
             type="button"
           >
-            <Cuboid className="size-3.5" />
-            <span>Object</span>
+            <Cuboid className="size-3" />
+            <span className="text-xs">Object</span>
           </button>
           <button
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-xl px-3 text-[11px] font-medium text-foreground/56 transition-colors",
-              resolvedScope === "faces" && "bg-white/10 text-foreground",
-              !canApplyToFaces && "opacity-35"
+              "inline-flex h-8 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium text-foreground/56 transition-colors",
+              resolvedScope === "faces" && "bg-white/5 text-foreground",
+              !canApplyToFaces && "opacity-35",
             )}
             disabled={!canApplyToFaces}
             onClick={() => setScope("faces")}
             type="button"
           >
-            <Square className="size-3.5" />
-            <span>Face</span>
+            <Square className="size-3" />
+            <span className="text-xs">Face</span>
           </button>
         </div>
-
-        <Button aria-label="Create custom material" onClick={beginNewMaterial} size="icon-sm" title="Create custom material" variant="ghost">
-          <Plus />
-        </Button>
       </div>
 
       <ScrollArea className="min-h-0 flex-1 pr-1">
@@ -207,117 +259,136 @@ export function MaterialLibraryPanel({
           <div className="space-y-2">
             <PanelLabel>Flat</PanelLabel>
             <div className="grid grid-cols-5 gap-2">
-          {flatMaterials.map((material) => (
-            <button
-              className={cn(
-                "size-8 rounded-xl transition-transform hover:scale-[1.04]",
-                selectedMaterialId === material.id && "bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]"
-              )}
-              key={material.id}
-              onClick={() => onSelectMaterial(material.id)}
-              style={{ backgroundColor: material.color }}
-              title={material.name}
-              type="button"
-            />
-          ))}
+              {flatMaterials.map((material) => (
+                <button
+                  className={cn(
+                    "size-8 rounded-xl transition-transform hover:scale-[1.04]",
+                    selectedMaterialId === material.id &&
+                      "bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]",
+                  )}
+                  key={material.id}
+                  onClick={() => onSelectMaterial(material.id)}
+                  style={{ backgroundColor: material.color }}
+                  title={material.name}
+                  type="button"
+                />
+              ))}
             </div>
-        </div>
+          </div>
 
           <div className="space-y-2">
             <PanelLabel>Blockout</PanelLabel>
             <div className="flex flex-wrap gap-2">
-          {blockoutMaterials.map((material) => (
-            <button
-              className={cn(
-                "size-8 rounded-xl bg-white/4 bg-cover bg-center transition-transform hover:scale-[1.04]",
-                selectedMaterialId === material.id && "bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]"
-              )}
-              key={material.id}
-              onClick={() => onSelectMaterial(material.id)}
-              style={{
-                backgroundColor: material.color,
-                backgroundImage: `url(${createBlockoutTextureDataUri(material.color, material.edgeColor ?? "#f5f2ea", material.edgeThickness ?? 0.018)})`,
-                backgroundPosition: "center",
-                backgroundSize: "cover"
-              }}
-              title={material.name}
-              type="button"
-            />
-          ))}
-            </div>
-        </div>
-
-          <div className="space-y-2">
-            <PanelLabel>Custom</PanelLabel>
-            <div className="space-y-1.5">
-            {customMaterials.map((material) => (
-              <div className="space-y-2" key={material.id}>
+              {blockoutMaterials.map((material) => (
                 <button
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-white/5",
-                    selectedMaterialId === material.id && "bg-white/8"
+                    "size-8 rounded-xl bg-white/4 bg-cover bg-center transition-transform hover:scale-[1.04]",
+                    selectedMaterialId === material.id &&
+                      "bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]",
                   )}
+                  key={material.id}
                   onClick={() => onSelectMaterial(material.id)}
+                  style={{
+                    backgroundColor: material.color,
+                    backgroundImage: `url(${createBlockoutTextureDataUri(material.color, material.edgeColor ?? "#f5f2ea", material.edgeThickness ?? 0.018)})`,
+                    backgroundPosition: "center",
+                    backgroundSize: "cover",
+                  }}
+                  title={material.name}
                   type="button"
-                >
-                  <div
-                    className="size-8 shrink-0 rounded-xl bg-[#121619] bg-cover bg-center"
-                    style={{
-                      backgroundColor: material.color,
-                      backgroundImage: material.colorTexture ? `url(${material.colorTexture})` : undefined
-                    }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] font-medium text-foreground/84">{material.name}</div>
-                  </div>
-                  <Button
-                    aria-label={`Edit ${material.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (expandedMaterialId === material.id) {
-                        setExpandedMaterialId(null);
-                        return;
-                      }
-                      beginEditMaterial(material);
-                    }}
-                    size="icon-xs"
-                    title={`Edit ${material.name}`}
-                    variant="ghost"
-                  >
-                    <Pencil />
-                  </Button>
-                </button>
-
-                {expandedMaterialId === material.id ? (
-                  <MaterialEditorForm
-                    draftMaterial={draftMaterial}
-                    fileInputsRef={fileInputsRef}
-                    isNew={false}
-                    onChangeDraft={setDraftMaterial}
-                    onDelete={() => onDeleteMaterial(material.id)}
-                    onSave={updateSelectedMaterial}
-                    onSaveAsNew={saveAsNewMaterial}
-                  />
-                ) : null}
-              </div>
-            ))}
-            {customMaterials.length === 0 && expandedMaterialId !== "new" ? (
-              <div className="px-2 py-3 text-[11px] text-foreground/40">No custom materials yet.</div>
-            ) : null}
-
-            {expandedMaterialId === "new" ? (
-              <MaterialEditorForm
-                draftMaterial={draftMaterial}
-                fileInputsRef={fileInputsRef}
-                isNew
-                onChangeDraft={setDraftMaterial}
-                onDelete={() => setExpandedMaterialId(null)}
-                onSave={updateSelectedMaterial}
-                onSaveAsNew={saveAsNewMaterial}
-              />
-            ) : null}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+
+          <div className="space-y-2">
+            <div className="flex flex-row justify-between">
+              <PanelLabel>Custom</PanelLabel>
+              <Button
+                aria-label="Create custom material"
+                onClick={beginNewMaterial}
+                size="icon-sm"
+                title="Create custom material"
+                variant="ghost"
+              >
+                <Plus />
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              {customMaterials.map((material) => (
+                <div className="space-y-2" key={material.id}>
+                  <button
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-white/5",
+                      selectedMaterialId === material.id && "bg-white/8",
+                    )}
+                    onClick={() => onSelectMaterial(material.id)}
+                    type="button"
+                  >
+                    <div
+                      className="size-8 shrink-0 rounded-xl bg-[#121619] bg-cover bg-center"
+                      style={{
+                        backgroundColor: material.color,
+                        backgroundImage: material.colorTexture
+                          ? `url(${material.colorTexture})`
+                          : undefined,
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-medium text-foreground/84">
+                        {material.name}
+                      </div>
+                    </div>
+                    <Button
+                      aria-label={`Edit ${material.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (expandedMaterialId === material.id) {
+                          setExpandedMaterialId(null);
+                          return;
+                        }
+                        beginEditMaterial(material);
+                      }}
+                      size="icon-xs"
+                      title={`Edit ${material.name}`}
+                      variant="ghost"
+                    >
+                      <Pencil />
+                    </Button>
+                  </button>
+
+                  {expandedMaterialId === material.id ? (
+                    <MaterialEditorForm
+                      draftMaterial={draftMaterial}
+                      fileInputsRef={fileInputsRef}
+                      isNew={false}
+                      onChangeDraft={setDraftMaterial}
+                      onDelete={() => onDeleteMaterial(material.id)}
+                      onSave={updateSelectedMaterial}
+                      onSaveAsNew={saveAsNewMaterial}
+                    />
+                  ) : null}
+                </div>
+              ))}
+              {customMaterials.length === 0 && expandedMaterialId !== "new" ? (
+                <div className="px-2 py-3 text-[11px] text-foreground/40">
+                  No custom materials yet.
+                </div>
+              ) : null}
+
+              {expandedMaterialId === "new" ? (
+                <MaterialEditorForm
+                  draftMaterial={draftMaterial}
+                  fileInputsRef={fileInputsRef}
+                  isNew
+                  onChangeDraft={setDraftMaterial}
+                  onDelete={() => setExpandedMaterialId(null)}
+                  onSave={updateSelectedMaterial}
+                  onSaveAsNew={saveAsNewMaterial}
+                />
+              ) : null}
+            </div>
+          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -356,9 +427,9 @@ export function MaterialLibraryPanel({
         </div>
       </ScrollArea>
 
-      <div className="sticky bottom-0 z-10 mt-2 bg-[#0b1512]/96 px-1 pt-3 backdrop-blur-xl">
+      <div className="sticky bottom-0 z-10 mt-2 px-1 pt-3 backdrop-blur-xl">
         <Button
-          className="w-full justify-center gap-2 rounded-2xl bg-emerald-500/14 text-emerald-100 hover:bg-emerald-500/22"
+          className="w-full justify-center gap-2 rounded-2xl bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/22"
           disabled={!canApply}
           onClick={applyCurrentSelection}
           size="sm"
@@ -373,7 +444,11 @@ export function MaterialLibraryPanel({
 }
 
 function PanelLabel({ children }: { children: string }) {
-  return <div className="text-[10px] font-medium tracking-[0.18em] text-foreground/42 uppercase">{children}</div>;
+  return (
+    <div className="text-[10px] font-medium tracking-[0.18em] text-foreground/42 uppercase">
+      {children}
+    </div>
+  );
 }
 
 function MaterialEditorForm({
@@ -383,10 +458,12 @@ function MaterialEditorForm({
   onChangeDraft,
   onDelete,
   onSave,
-  onSaveAsNew
+  onSaveAsNew,
 }: {
   draftMaterial: Material;
-  fileInputsRef: React.MutableRefObject<Record<string, HTMLInputElement | null>>;
+  fileInputsRef: React.MutableRefObject<
+    Record<string, HTMLInputElement | null>
+  >;
   isNew: boolean;
   onChangeDraft: React.Dispatch<React.SetStateAction<Material>>;
   onDelete: () => void;
@@ -400,7 +477,12 @@ function MaterialEditorForm({
           <PanelLabel>Name</PanelLabel>
           <Input
             className="border-0 bg-white/6"
-            onChange={(event) => onChangeDraft((current) => ({ ...current, name: event.target.value }))}
+            onChange={(event) =>
+              onChangeDraft((current) => ({
+                ...current,
+                name: event.target.value,
+              }))
+            }
             value={draftMaterial.name}
           />
         </div>
@@ -408,7 +490,12 @@ function MaterialEditorForm({
           <PanelLabel>Color</PanelLabel>
           <input
             className="h-9 w-10 rounded-xl bg-transparent p-0"
-            onChange={(event) => onChangeDraft((current) => ({ ...current, color: event.target.value }))}
+            onChange={(event) =>
+              onChangeDraft((current) => ({
+                ...current,
+                color: event.target.value,
+              }))
+            }
             type="color"
             value={draftMaterial.color}
           />
@@ -421,7 +508,9 @@ function MaterialEditorForm({
           label="Metal"
           max={1}
           min={0}
-          onChange={(value) => onChangeDraft((current) => ({ ...current, metalness: value }))}
+          onChange={(value) =>
+            onChangeDraft((current) => ({ ...current, metalness: value }))
+          }
           precision={2}
           step={0.01}
           value={draftMaterial.metalness ?? 0}
@@ -431,7 +520,9 @@ function MaterialEditorForm({
           label="Rough"
           max={1}
           min={0}
-          onChange={(value) => onChangeDraft((current) => ({ ...current, roughness: value }))}
+          onChange={(value) =>
+            onChangeDraft((current) => ({ ...current, roughness: value }))
+          }
           precision={2}
           step={0.01}
           value={draftMaterial.roughness ?? 0.8}
@@ -443,16 +534,30 @@ function MaterialEditorForm({
           <div className="flex items-center gap-2" key={field}>
             <div
               className="size-8 shrink-0 rounded-xl bg-[#121619] bg-cover bg-center"
-              style={{ backgroundImage: draftMaterial[field] ? `url(${draftMaterial[field]})` : undefined }}
+              style={{
+                backgroundImage: draftMaterial[field]
+                  ? `url(${draftMaterial[field]})`
+                  : undefined,
+              }}
             />
-            <div className="min-w-0 flex-1 text-[11px] text-foreground/64">{label}</div>
-            <Button aria-label={`Add ${label}`} onClick={() => fileInputsRef.current[field]?.click()} size="icon-xs" title={`Add ${label}`} variant="ghost">
+            <div className="min-w-0 flex-1 text-[11px] text-foreground/64">
+              {label}
+            </div>
+            <Button
+              aria-label={`Add ${label}`}
+              onClick={() => fileInputsRef.current[field]?.click()}
+              size="icon-xs"
+              title={`Add ${label}`}
+              variant="ghost"
+            >
               <ImagePlus />
             </Button>
             <Button
               aria-label={`Clear ${label}`}
               disabled={!draftMaterial[field]}
-              onClick={() => onChangeDraft((current) => ({ ...current, [field]: undefined }))}
+              onClick={() =>
+                onChangeDraft((current) => ({ ...current, [field]: undefined }))
+              }
               size="icon-xs"
               title={`Clear ${label}`}
               variant="ghost"
@@ -462,7 +567,9 @@ function MaterialEditorForm({
             <input
               accept="image/*"
               hidden
-              onChange={(event) => void handleTextureUpload(field, event, onChangeDraft)}
+              onChange={(event) =>
+                void handleTextureUpload(field, event, onChangeDraft)
+              }
               ref={(element) => {
                 fileInputsRef.current[field] = element;
               }}
@@ -473,13 +580,31 @@ function MaterialEditorForm({
       </div>
 
       <div className="flex items-center justify-end gap-1">
-        <Button aria-label={isNew ? "Save material" : "Update material"} onClick={onSave} size="icon-xs" title={isNew ? "Save material" : "Update material"} variant="ghost">
+        <Button
+          aria-label={isNew ? "Save material" : "Update material"}
+          onClick={onSave}
+          size="icon-xs"
+          title={isNew ? "Save material" : "Update material"}
+          variant="ghost"
+        >
           <Save />
         </Button>
-        <Button aria-label="Save as new material" onClick={onSaveAsNew} size="icon-xs" title="Save as new material" variant="ghost">
+        <Button
+          aria-label="Save as new material"
+          onClick={onSaveAsNew}
+          size="icon-xs"
+          title="Save as new material"
+          variant="ghost"
+        >
           <Copy />
         </Button>
-        <Button aria-label={isNew ? "Close editor" : "Delete material"} onClick={onDelete} size="icon-xs" title={isNew ? "Close editor" : "Delete material"} variant="ghost">
+        <Button
+          aria-label={isNew ? "Close editor" : "Delete material"}
+          onClick={onDelete}
+          size="icon-xs"
+          title={isNew ? "Close editor" : "Delete material"}
+          variant="ghost"
+        >
           {isNew ? <X /> : <Trash2 />}
         </Button>
       </div>
@@ -497,7 +622,7 @@ function createDraftMaterial(material?: Material): Material {
         ...structuredClone(material),
         category: "custom",
         metalness: material.metalness ?? 0,
-        roughness: material.roughness ?? 0.8
+        roughness: material.roughness ?? 0.8,
       }
     : {
         category: "custom",
@@ -505,16 +630,17 @@ function createDraftMaterial(material?: Material): Material {
         id: "material:custom:draft",
         metalness: 0,
         name: "Custom Material",
-        roughness: 0.8
+        roughness: 0.8,
       };
 }
 
 function createCustomMaterialId(name: string) {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "") || "material";
+  const slug =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || "material";
 
   return `material:custom:${slug}:${Date.now().toString(36)}`;
 }
@@ -522,7 +648,7 @@ function createCustomMaterialId(name: string) {
 async function handleTextureUpload(
   field: (typeof TEXTURE_FIELDS)[number]["field"],
   event: ChangeEvent<HTMLInputElement>,
-  setDraftMaterial: React.Dispatch<React.SetStateAction<Material>>
+  setDraftMaterial: React.Dispatch<React.SetStateAction<Material>>,
 ) {
   const file = event.target.files?.[0];
 
@@ -538,8 +664,10 @@ async function handleTextureUpload(
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Failed to read file."));
+    reader.onload = () =>
+      resolve(typeof reader.result === "string" ? reader.result : "");
     reader.readAsDataURL(file);
   });
 }
