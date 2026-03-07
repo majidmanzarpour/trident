@@ -1,6 +1,7 @@
 import type { SVGProps } from "react";
 import {
   Box,
+  Cuboid,
   Grid3X3,
   MousePointer2,
   Move3d,
@@ -49,6 +50,8 @@ export function toolIconFor(toolId: ToolId) {
       return MousePointer2;
     case "transform":
       return Move3d;
+    case "brush":
+      return Cuboid;
     case "clip":
       return Scissors;
     case "extrude":

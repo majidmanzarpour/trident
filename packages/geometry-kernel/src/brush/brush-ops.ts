@@ -31,6 +31,35 @@ export function splitAxisAlignedBrush(brush: Brush, axis: BrushAxis): [Brush, Br
   return [createAxisAlignedBrushFromBounds(first), createAxisAlignedBrushFromBounds(second)];
 }
 
+export function splitAxisAlignedBrushAtCoordinate(
+  brush: Brush,
+  axis: BrushAxis,
+  coordinate: number,
+  epsilon = 0.0001
+): [Brush, Brush] | undefined {
+  const bounds = getAxisAlignedBrushBounds(brush);
+
+  if (!bounds) {
+    return undefined;
+  }
+
+  const min = bounds[axis].min;
+  const max = bounds[axis].max;
+  const clamped = Math.min(Math.max(coordinate, min), max);
+
+  if (clamped - min <= epsilon || max - clamped <= epsilon) {
+    return undefined;
+  }
+
+  const first = cloneBounds(bounds);
+  first[axis].max = clamped;
+
+  const second = cloneBounds(bounds);
+  second[axis].min = clamped;
+
+  return [createAxisAlignedBrushFromBounds(first), createAxisAlignedBrushFromBounds(second)];
+}
+
 export function extrudeAxisAlignedBrush(
   brush: Brush,
   axis: BrushAxis,
@@ -49,6 +78,34 @@ export function extrudeAxisAlignedBrush(
     next[axis].max += amount;
   } else {
     next[axis].min -= amount;
+  }
+
+  return createAxisAlignedBrushFromBounds(next);
+}
+
+export function offsetAxisAlignedBrushFace(
+  brush: Brush,
+  axis: BrushAxis,
+  side: "max" | "min",
+  amount: number,
+  epsilon = 0.0001
+): Brush | undefined {
+  const bounds = getAxisAlignedBrushBounds(brush);
+
+  if (!bounds) {
+    return undefined;
+  }
+
+  const next = cloneBounds(bounds);
+
+  if (side === "max") {
+    next[axis].max += amount;
+  } else {
+    next[axis].min -= amount;
+  }
+
+  if (next[axis].max - next[axis].min <= epsilon) {
+    return undefined;
   }
 
   return createAxisAlignedBrushFromBounds(next);

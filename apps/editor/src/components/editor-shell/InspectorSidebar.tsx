@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Asset, GeometryNode, Material, Transform, Vec3 } from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
-import type { WorkerJob } from "@web-hammer/workers";
 import { Button } from "@/components/ui/button";
 import { DragInput } from "@/components/ui/drag-input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,7 +11,6 @@ type InspectorSidebarProps = {
   activeRightPanel: "inspector" | "materials";
   activeToolId: ToolId;
   assets: Asset[];
-  jobs: WorkerJob[];
   materials: Material[];
   onAssignMaterial: (materialId: string) => void;
   onChangeRightPanel: (panel: "inspector" | "materials") => void;
@@ -25,7 +23,7 @@ type InspectorSidebarProps = {
   onSelectAsset: (assetId: string) => void;
   onSelectMaterial: (materialId: string) => void;
   onTranslateSelection: (axis: "x" | "y" | "z", direction: -1 | 1) => void;
-  onUpdateNodeTransform: (nodeId: string, transform: Transform) => void;
+  onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
   selectedAssetId: string;
   selectedMaterialId: string;
   selectedNode?: GeometryNode;
@@ -38,7 +36,6 @@ export function InspectorSidebar({
   activeRightPanel,
   activeToolId,
   assets,
-  jobs,
   materials,
   onAssignMaterial,
   onChangeRightPanel,
@@ -301,21 +298,6 @@ export function InspectorSidebar({
                 </div>
               </ToolSection>
 
-              {jobs.length > 0 ? (
-                <ToolSection title="Jobs">
-                  <div className="space-y-1">
-                    {jobs.slice(0, 5).map((job) => (
-                      <div
-                        className="flex items-center justify-between rounded-xl bg-white/4 px-2.5 py-1.5 text-[11px] text-foreground/56"
-                        key={job.id}
-                      >
-                        <span className="truncate">{job.label}</span>
-                        <span className="ml-3 shrink-0 capitalize text-foreground/36">{job.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </ToolSection>
-              ) : null}
             </div>
           </TabsContent>
 

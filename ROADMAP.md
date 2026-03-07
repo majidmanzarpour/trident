@@ -2,7 +2,7 @@
 
 ## Status
 
-Last updated: 2026-03-06
+Last updated: 2026-03-07
 
 ## Completed
 
@@ -26,17 +26,40 @@ Last updated: 2026-03-06
 - Expanded Phase 9 so selected assets drive model placement, selected materials can be assigned to brushes with visible viewport color changes, and export/persistence jobs execute in a real Web Worker.
 - Started Phase 10 with `.whmap` scene save/load plus baseline glTF and engine-scene export flows running through the worker pipeline.
 - Revamped the editor UI around Tailwind and shadcn: added the `@/` app alias, replaced the old scaffold with a floating menu/toolbar/sidebar layout, moved styling to Tailwind-first components, and added drag-input-backed transform editing in the inspector.
+- Moved async job visibility out of the inspector and into a dedicated bottom-bar status affordance with an idle/active icon and popover-backed active job list.
+- Expanded the viewport transform workflow with live gizmos for translate/rotate/scale, `G`/`R`/`S` gizmo mode switching, snap-aware transform controls, and a custom snap-driven grid with reduced camera-motion flicker.
+- Fixed the viewport gizmo/orbit interaction handoff so camera controls recover correctly after transform drags.
+- Refined the construction grid so the full-scene sheet uses subtle gray major/minor lines and the visible cell spacing maps directly to the active snap size.
+- Tuned the construction grid contrast so the snap-sized minor cells remain the primary visible grid, with major lines only as secondary guides.
+- Expanded Phase 7 and Phase 8 into real canvas interactions: clip now previews snap-aware cut lines on brush faces and cuts on click, extrude exposes draggable face-center handles with live brush updates, and mesh edit now supports vertex/edge/face handle selection with translate/rotate/scale gizmos.
+- Refined the in-canvas editing affordances so clip uses offset hover surfaces with visible cut previews, extrude uses slimmer direct-drag face handles instead of click-then-gizmo spheres, and mesh edit overlays render more editor-style vertex/edge/face markers.
+- Extended subobject editing to box brushes so `Mesh Edit` can now target brush faces, edges, and vertices with snapped handle-based plane updates, not just editable mesh assets.
+- Fixed subobject authoring ergonomics so brush/mesh edit gizmos align with their handle centers, `Shift`-click supports additive handle selection, and `Shift`-drag marquee can select multiple brush or mesh subobjects in `Mesh Edit`.
+- Tightened subobject transform feedback so mesh/brush edit gizmos track the live edited selection center while dragging, keeping handles and transform anchors visually in sync during preview updates.
+- Fixed stale mesh/brush edit overlay caching so face/edge/vertex outlines and knobs recompute from the current preview geometry instead of sticking to their pre-edit positions.
+- Fixed mesh-edit transform-control remounting so `G`/`R`/`S` mode switches are reflected by the active subobject gizmo instead of leaving a stale translate gizmo onscreen.
+- Replaced the broken bounds-based brush subobject transform approximation with a plane-based convex brush edit path that transforms selected brush vertices and recomputes incident planes for face/edge/vertex move, rotate, and scale.
+- Fixed the brush subobject gizmo branch to actually consume the active transform mode, so brush face/edge/vertex editing now switches between `G` / `R` / `S` instead of silently staying on translate.
+- Removed redundant viewport drag-lock coupling from `TransformControls` paths and deferred orbit disabling back to Drei’s built-in `dragging-changed` handling, reducing stuck-camera failures during mesh/brush gizmo edits.
+- Stabilized convex brush subobject identity across preview updates by keying brush vertices and edges from incident face sets, reducing selection loss, gizmo disappearance, and stuck-camera failures when aggressive brush rotations approach collapsed states.
+- Tightened convex brush plane recomputation so face/edge/vertex edits only rewrite the planes explicitly associated with the selected subobject, reducing drift, overreaction, and unintended opposite-face motion during brush rotation and scale.
+- Refined convex brush plane selection again so face and edge rotate/scale only recompute incident planes whose transformed vertices actually leave their original planes, improving the face-parallel rotation axis, edge rotation reliability, and edge scaling behavior.
+- Replaced the remaining brush plane-refit path for subobject rotate/scale with a convex-hull rebuild from transformed brush vertices, so face and edge edits can change topology when needed instead of drifting or incorrectly dragging the whole original plane set along.
+- Fixed subobject drag jitter by freezing the mesh/brush transform gizmo anchor while preview edits rerender, so live move/rotate/scale no longer flicker between the baseline anchor and the preview-derived selection center during a drag.
+- Removed the remaining drag-loop instability by letting the hidden gizmo target stay fully imperative during active drags and by freezing brush subobject handle topology at drag start, so preview rerenders no longer reset the control object or swap the selected baseline under the solver mid-gesture.
+- Added real brush authoring entry points so new blockout brushes can be placed into the scene from the menu bar or scene panel instead of working only from the seeded demo brush.
+- Expanded the in-canvas brush extrude tool from axis-aligned face offsetting to convex brush feature extrusion, including direct-drag edge extrusion handles alongside face extrusion handles.
 
 ## Next
 
 - Phase 5: build hit testing, raycasting, and marquee selection on top of BVH-backed render data.
   Current gap: face/edge/vertex hit testing, deeper BVH query plumbing, and robust multi-mode marquee behavior are still missing.
 - Phase 6: implement transform tools, snapping, duplication, and mirror workflows.
-  Current gap: viewport gizmos, drag transforms, rotate/scale editing, and transform-space controls are still missing.
+  Current gap: transform gizmos now exist for translate/rotate/scale, but transform-space controls, multi-object gizmo editing, and richer snapping rules are still missing.
 - Phase 7: add brush editing operations such as clip, split, hollow, merge, and face extrusion.
-  Current gap: arbitrary-plane clipping, face extrusion, hollow/merge flows, and non-box brush editing are still missing.
+  Current gap: clipping and extrusion now work for axis-aligned box brushes in-canvas, but arbitrary-plane clipping, hollow/merge flows, and non-box brush editing are still missing.
 - Phase 8: add mesh editing tools such as extrude, bevel, split edge, loop cut, and merge vertices.
-  Current gap: real topology-editing operations are still missing; current mesh edit is object-level deformation only.
+  Current gap: vertex/edge/face subobject selection and full translate/rotate/scale editing now work for editable meshes and convex brush subobjects, but topology-changing operations like bevel, loop cut, split edge, face extrude, weld, and deeper validation/polish for arbitrary brush edits are still missing.
 - Phase 9: add materials, assets, entity authoring, and worker-backed async jobs.
   Current gap: richer asset catalogs, direct entity selection/editing, and real worker-backed geometry/nav rebuild jobs are still missing; only export/persistence currently runs in a real Web Worker.
 - Phase 10: implement `.whmap` persistence plus GLTF and engine export flows.

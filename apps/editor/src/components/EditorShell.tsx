@@ -1,6 +1,6 @@
 import type { EditorCore, TransformAxis } from "@web-hammer/editor-core";
 import type { GridSnapValue, DerivedRenderScene, ViewportState } from "@web-hammer/render-pipeline";
-import type { Transform } from "@web-hammer/shared";
+import type { Brush, EditableMesh, Transform } from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
 import type { WorkerJob } from "@web-hammer/workers";
 import { EditorMenuBar } from "@/components/editor-shell/EditorMenuBar";
@@ -9,6 +9,7 @@ import { SceneSidebar } from "@/components/editor-shell/SceneSidebar";
 import { StatusBar } from "@/components/editor-shell/StatusBar";
 import { ToolPalette } from "@/components/editor-shell/ToolPalette";
 import { ViewportCanvas } from "@/viewport/ViewportCanvas";
+import type { MeshEditMode } from "@/viewport/editing";
 
 type EditorShellProps = {
   activeRightPanel: "inspector" | "materials";
@@ -18,8 +19,11 @@ type EditorShellProps = {
   editor: EditorCore;
   gridSnapValues: readonly GridSnapValue[];
   jobs: WorkerJob[];
+  meshEditMode: MeshEditMode;
   onAssignMaterial: (materialId: string) => void;
   onClipSelection: (axis: TransformAxis) => void;
+  onCreateBrush: () => void;
+  onDeleteSelection: () => void;
   onDuplicateSelection: () => void;
   onClearSelection: () => void;
   onExportEngine: () => void;
@@ -31,6 +35,9 @@ type EditorShellProps = {
   onMeshInflate: (factor: number) => void;
   onMirrorSelection: (axis: TransformAxis) => void;
   onPlaceAsset: (position: { x: number; y: number; z: number }) => void;
+  onPlaceBrush: (brush: Brush, transform: Transform) => void;
+  onPreviewBrushData: (nodeId: string, brush: Brush) => void;
+  onPreviewMeshData: (nodeId: string, mesh: EditableMesh) => void;
   onRedo: () => void;
   onSaveWhmap: () => void;
   onSelectAsset: (assetId: string) => void;
@@ -39,12 +46,17 @@ type EditorShellProps = {
   onSetRightPanel: (panel: "inspector" | "materials") => void;
   onSetSnapSize: (snapSize: GridSnapValue) => void;
   onSetToolId: (toolId: ToolId) => void;
+  onSplitBrushAtCoordinate: (nodeId: string, axis: TransformAxis, coordinate: number) => void;
+  onPreviewNodeTransform: (nodeId: string, transform: Transform) => void;
   onTranslateSelection: (axis: TransformAxis, direction: -1 | 1) => void;
   onUndo: () => void;
-  onUpdateNodeTransform: (nodeId: string, transform: Transform) => void;
+  onUpdateBrushData: (nodeId: string, brush: Brush, beforeBrush?: Brush) => void;
+  onUpdateMeshData: (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => void;
+  onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
   renderScene: DerivedRenderScene;
   selectedAssetId: string;
   selectedMaterialId: string;
+  transformMode: "rotate" | "scale" | "translate";
   tools: Array<{ id: ToolId; label: string }>;
   viewport: ViewportState;
 };
@@ -57,8 +69,11 @@ export function EditorShell({
   editor,
   gridSnapValues,
   jobs,
+  meshEditMode,
   onAssignMaterial,
   onClipSelection,
+  onCreateBrush,
+  onDeleteSelection,
   onDuplicateSelection,
   onClearSelection,
   onExportEngine,
@@ -70,6 +85,9 @@ export function EditorShell({
   onMeshInflate,
   onMirrorSelection,
   onPlaceAsset,
+  onPlaceBrush,
+  onPreviewBrushData,
+  onPreviewMeshData,
   onRedo,
   onSaveWhmap,
   onSelectAsset,
@@ -78,12 +96,17 @@ export function EditorShell({
   onSetRightPanel,
   onSetSnapSize,
   onSetToolId,
+  onSplitBrushAtCoordinate,
+  onPreviewNodeTransform,
   onTranslateSelection,
   onUndo,
+  onUpdateBrushData,
+  onUpdateMeshData,
   onUpdateNodeTransform,
   renderScene,
   selectedAssetId,
   selectedMaterialId,
+  transformMode,
   tools,
   viewport
 }: EditorShellProps) {
@@ -101,6 +124,8 @@ export function EditorShell({
           canRedo={canRedo}
           canUndo={canUndo}
           onClearSelection={onClearSelection}
+          onCreateBrush={onCreateBrush}
+          onDeleteSelection={onDeleteSelection}
           onDuplicateSelection={onDuplicateSelection}
           onExportEngine={onExportEngine}
           onExportGltf={onExportGltf}
@@ -119,12 +144,23 @@ export function EditorShell({
       <main className="relative min-h-0 flex-1">
         <ViewportCanvas
           activeToolId={activeToolId}
+          meshEditMode={meshEditMode}
           onClearSelection={onClearSelection}
           onFocusNode={onFocusNode}
           onPlaceAsset={onPlaceAsset}
+          onPlaceBrush={onPlaceBrush}
+          onPreviewBrushData={onPreviewBrushData}
+          onPreviewMeshData={onPreviewMeshData}
+          onPreviewNodeTransform={onPreviewNodeTransform}
           onSelectNodes={onSelectNodes}
+          onSplitBrushAtCoordinate={onSplitBrushAtCoordinate}
+          onUpdateBrushData={onUpdateBrushData}
+          onUpdateMeshData={onUpdateMeshData}
+          onUpdateNodeTransform={onUpdateNodeTransform}
           renderScene={renderScene}
+          selectedNode={selectedNode}
           selectedNodeIds={editor.selection.ids}
+          transformMode={transformMode}
           viewport={viewport}
         />
 
@@ -139,6 +175,7 @@ export function EditorShell({
 
         <SceneSidebar
           nodes={nodes}
+          onCreateBrush={onCreateBrush}
           onFocusNode={onFocusNode}
           onSelectNodes={onSelectNodes}
           selectedNodeId={selectedNodeId}
@@ -148,7 +185,6 @@ export function EditorShell({
           activeRightPanel={activeRightPanel}
           activeToolId={activeToolId}
           assets={assets}
-          jobs={jobs}
           materials={materials}
           onAssignMaterial={onAssignMaterial}
           onChangeRightPanel={onSetRightPanel}
@@ -171,6 +207,8 @@ export function EditorShell({
         <StatusBar
           activeToolLabel={activeToolLabel}
           gridSnapValues={gridSnapValues}
+          jobs={jobs}
+          meshEditMode={meshEditMode}
           selectedNode={selectedNode}
           viewport={viewport}
         />

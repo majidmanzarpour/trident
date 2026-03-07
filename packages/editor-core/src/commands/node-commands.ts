@@ -1,11 +1,24 @@
 import {
+  createAxisAlignedBrushFromBounds,
   extrudeAxisAlignedBrush,
   inflateEditableMesh,
+  offsetAxisAlignedBrushFace,
   offsetEditableMeshTop,
   splitAxisAlignedBrush,
+  splitAxisAlignedBrushAtCoordinate,
   type BrushAxis
 } from "@web-hammer/geometry-kernel";
-import type { BrushNode, Entity, GeometryNode, MeshNode, ModelNode, Transform, Vec3 } from "@web-hammer/shared";
+import type {
+  Brush,
+  BrushNode,
+  EditableMesh,
+  Entity,
+  GeometryNode,
+  MeshNode,
+  ModelNode,
+  Transform,
+  Vec3
+} from "@web-hammer/shared";
 import { addVec3, isBrushNode, isMeshNode, scaleVec3, vec3 } from "@web-hammer/shared";
 import type { Command } from "./command-stack";
 import type { SceneDocument } from "../document/scene-document";
@@ -39,7 +52,8 @@ export function createMirrorNodesCommand(nodeIds: string[], axis: TransformAxis)
 export function createSetNodeTransformCommand(
   scene: SceneDocument,
   nodeId: string,
-  nextTransform: Transform
+  nextTransform: Transform,
+  beforeTransform?: Transform
 ): Command {
   const node = scene.getNode(nodeId);
 
@@ -51,7 +65,7 @@ export function createSetNodeTransformCommand(
     };
   }
 
-  const before = structuredClone(node.transform);
+  const before = structuredClone(beforeTransform ?? node.transform);
   const next = structuredClone(nextTransform);
 
   return {
@@ -74,6 +88,94 @@ export function createSetNodeTransformCommand(
       }
 
       nextNode.transform = structuredClone(before);
+      nextScene.touch();
+    }
+  };
+}
+
+export function createSetBrushDataCommand(
+  scene: SceneDocument,
+  nodeId: string,
+  nextData: Brush,
+  beforeData?: Brush
+): Command {
+  const node = scene.getNode(nodeId);
+
+  if (!node || !isBrushNode(node)) {
+    return {
+      label: "set brush",
+      execute() {},
+      undo() {}
+    };
+  }
+
+  const before = structuredClone(beforeData ?? node.data);
+  const next = structuredClone(nextData);
+
+  return {
+    label: "set brush",
+    execute(nextScene) {
+      const nextNode = nextScene.getNode(nodeId);
+
+      if (!nextNode || !isBrushNode(nextNode)) {
+        return;
+      }
+
+      nextNode.data = structuredClone(next);
+      nextScene.touch();
+    },
+    undo(nextScene) {
+      const nextNode = nextScene.getNode(nodeId);
+
+      if (!nextNode || !isBrushNode(nextNode)) {
+        return;
+      }
+
+      nextNode.data = structuredClone(before);
+      nextScene.touch();
+    }
+  };
+}
+
+export function createSetMeshDataCommand(
+  scene: SceneDocument,
+  nodeId: string,
+  nextData: EditableMesh,
+  beforeData?: EditableMesh
+): Command {
+  const node = scene.getNode(nodeId);
+
+  if (!node || !isMeshNode(node)) {
+    return {
+      label: "set mesh",
+      execute() {},
+      undo() {}
+    };
+  }
+
+  const before = structuredClone(beforeData ?? node.data);
+  const next = structuredClone(nextData);
+
+  return {
+    label: "set mesh",
+    execute(nextScene) {
+      const nextNode = nextScene.getNode(nodeId);
+
+      if (!nextNode || !isMeshNode(nextNode)) {
+        return;
+      }
+
+      nextNode.data = structuredClone(next);
+      nextScene.touch();
+    },
+    undo(nextScene) {
+      const nextNode = nextScene.getNode(nodeId);
+
+      if (!nextNode || !isMeshNode(nextNode)) {
+        return;
+      }
+
+      nextNode.data = structuredClone(before);
       nextScene.touch();
     }
   };
@@ -113,6 +215,37 @@ export function createDuplicateNodesCommand(
       }
     },
     duplicateIds: duplicates.map((duplicate) => duplicate.id)
+  };
+}
+
+export function createDeleteSelectionCommand(scene: SceneDocument, ids: string[]): Command {
+  const nodes = ids
+    .map((id) => scene.getNode(id))
+    .filter((node): node is GeometryNode => Boolean(node))
+    .map((node) => structuredClone(node));
+  const entities = ids
+    .map((id) => scene.getEntity(id))
+    .filter((entity): entity is Entity => Boolean(entity))
+    .map((entity) => structuredClone(entity));
+
+  return {
+    label: "delete selection",
+    execute(nextScene) {
+      nodes.forEach((node) => {
+        nextScene.removeNode(node.id);
+      });
+      entities.forEach((entity) => {
+        nextScene.removeEntity(entity.id);
+      });
+    },
+    undo(nextScene) {
+      nodes.forEach((node) => {
+        nextScene.addNode(structuredClone(node));
+      });
+      entities.forEach((entity) => {
+        nextScene.addEntity(structuredClone(entity));
+      });
+    }
   };
 }
 
@@ -170,6 +303,69 @@ export function createSplitBrushNodesCommand(
   };
 }
 
+export function createSplitBrushNodeAtCoordinateCommand(
+  scene: SceneDocument,
+  nodeId: string,
+  axis: BrushAxis,
+  coordinate: number
+): {
+  command: Command;
+  splitIds: string[];
+} {
+  const node = scene.getNode(nodeId);
+
+  if (!node || !isBrushNode(node)) {
+    return {
+      command: {
+        label: `clip ${axis}`,
+        execute() {},
+        undo() {}
+      },
+      splitIds: []
+    };
+  }
+
+  const splitBrushes = splitAxisAlignedBrushAtCoordinate(node.data, axis, coordinate);
+
+  if (!splitBrushes) {
+    return {
+      command: {
+        label: `clip ${axis}`,
+        execute() {},
+        undo() {}
+      },
+      splitIds: []
+    };
+  }
+
+  const original = structuredClone(node);
+  const replacements = splitBrushes.map((brush, index) => ({
+    ...structuredClone(node),
+    id: createDuplicateNodeId(scene, `${node.id}:clip:${axis}:${index + 1}`),
+    name: `${node.name} ${axis.toUpperCase()}${index + 1}`,
+    data: brush
+  }));
+
+  return {
+    command: {
+      label: `clip ${axis}`,
+      execute(nextScene) {
+        nextScene.removeNode(original.id);
+        replacements.forEach((replacement) => {
+          nextScene.addNode(structuredClone(replacement));
+        });
+      },
+      undo(nextScene) {
+        replacements.forEach((replacement) => {
+          nextScene.removeNode(replacement.id);
+        });
+        nextScene.addNode(structuredClone(original));
+      }
+    },
+    splitIds: replacements.map((replacement) => replacement.id)
+  };
+}
+
 export function createExtrudeBrushNodesCommand(
   scene: SceneDocument,
   nodeIds: string[],
@@ -210,6 +406,36 @@ export function createExtrudeBrushNodesCommand(
       });
     }
   };
+}
+
+export function createOffsetBrushFaceCommand(
+  scene: SceneDocument,
+  nodeId: string,
+  axis: BrushAxis,
+  side: "max" | "min",
+  amount: number
+): Command {
+  const node = scene.getNode(nodeId);
+
+  if (!node || !isBrushNode(node)) {
+    return {
+      label: `extrude ${axis}`,
+      execute() {},
+      undo() {}
+    };
+  }
+
+  const next = offsetAxisAlignedBrushFace(node.data, axis, side, amount);
+
+  if (!next) {
+    return {
+      label: `extrude ${axis}`,
+      execute() {},
+      undo() {}
+    };
+  }
+
+  return createSetBrushDataCommand(scene, nodeId, next, node.data);
 }
 
 export function createMeshInflateCommand(scene: SceneDocument, nodeIds: string[], factor: number): Command {
@@ -262,6 +488,44 @@ export function createPlaceModelNodeCommand(
   return {
     command: {
       label: "place asset",
+      execute(nextScene) {
+        nextScene.addNode(structuredClone(node));
+      },
+      undo(nextScene) {
+        nextScene.removeNode(node.id);
+      }
+    },
+    nodeId
+  };
+}
+
+export function createPlaceBrushNodeCommand(
+  scene: SceneDocument,
+  transform: Transform,
+  brush: Pick<BrushNode, "data" | "name"> = {
+    data: createAxisAlignedBrushFromBounds({
+      x: { min: -2, max: 2 },
+      y: { min: -1.5, max: 1.5 },
+      z: { min: -2, max: 2 }
+    }),
+    name: "Blockout Brush"
+  }
+): {
+  command: Command;
+  nodeId: string;
+} {
+  const nodeId = createDuplicateNodeId(scene, "node:brush:placed");
+  const node: BrushNode = {
+    id: nodeId,
+    kind: "brush",
+    name: brush.name,
+    transform: structuredClone(transform),
+    data: structuredClone(brush.data)
+  };
+
+  return {
+    command: {
+      label: "place brush",
       execute(nextScene) {
         nextScene.addNode(structuredClone(node));
       },

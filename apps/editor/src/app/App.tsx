@@ -3,23 +3,39 @@ import { useSnapshot } from "valtio";
 import {
   axisDelta,
   createAssignMaterialToBrushesCommand,
+  createDeleteSelectionCommand,
   createExtrudeBrushNodesCommand,
   createDuplicateNodesCommand,
   createEditorCore,
+  createSetBrushDataCommand,
+  createSetMeshDataCommand,
   type SceneDocumentSnapshot,
   createSetNodeTransformCommand,
   createPlaceEntityCommand,
   createMeshInflateCommand,
   createMeshRaiseTopCommand,
   createMirrorNodesCommand,
+  createPlaceBrushNodeCommand,
   createPlaceModelNodeCommand,
   createSeedSceneDocument,
+  createSplitBrushNodeAtCoordinateCommand,
   createSplitBrushNodesCommand,
   createTranslateNodesCommand,
   type TransformAxis
 } from "@web-hammer/editor-core";
 import { deriveRenderScene, gridSnapValues } from "@web-hammer/render-pipeline";
-import { addVec3, isBrushNode, isMeshNode, makeTransform, snapVec3, subVec3, vec3, type Vec3 } from "@web-hammer/shared";
+import {
+  addVec3,
+  isBrushNode,
+  isMeshNode,
+  makeTransform,
+  snapVec3,
+  subVec3,
+  vec3,
+  type Brush,
+  type EditableMesh,
+  type Vec3
+} from "@web-hammer/shared";
 import { createToolSession, defaultToolId, defaultTools, type ToolId } from "@web-hammer/tool-system";
 import {
   createWorkerTaskManager,
@@ -29,6 +45,8 @@ import {
 } from "@web-hammer/workers";
 import { EditorShell } from "@/components/EditorShell";
 import { uiStore } from "@/state/ui-store";
+import type { Transform } from "@web-hammer/shared";
+import type { MeshEditMode } from "@/viewport/editing";
 
 type ExportWorkerRequest = WorkerRequest extends infer Request
   ? Request extends { id: string }
@@ -39,6 +57,8 @@ type ExportWorkerRequest = WorkerRequest extends infer Request
 export function App() {
   const [editor] = useState(() => createEditorCore(createSeedSceneDocument()));
   const [activeToolId, setActiveToolId] = useState<ToolId>(defaultToolId);
+  const [meshEditMode, setMeshEditMode] = useState<MeshEditMode>("vertex");
+  const [transformMode, setTransformMode] = useState<"rotate" | "scale" | "translate">("translate");
   const [workerManager] = useState(() => createWorkerTaskManager());
   const [workerJobs, setWorkerJobs] = useState<WorkerJob[]>([]);
   const [exportJobs, setExportJobs] = useState<WorkerJob[]>([]);
@@ -161,15 +181,89 @@ export function App() {
     uiStore.viewport.grid.snapSize = snapSize;
   };
 
-  const handleUpdateNodeTransform = (nodeId: string, transform: Parameters<typeof createSetNodeTransformCommand>[2]) => {
+  const handleUpdateNodeTransform = (
+    nodeId: string,
+    transform: Parameters<typeof createSetNodeTransformCommand>[2],
+    beforeTransform?: Parameters<typeof createSetNodeTransformCommand>[3]
+  ) => {
     const node = editor.scene.getNode(nodeId);
 
     if (!node) {
       return;
     }
 
-    editor.execute(createSetNodeTransformCommand(editor.scene, nodeId, transform));
+    editor.execute(createSetNodeTransformCommand(editor.scene, nodeId, transform, beforeTransform));
     enqueueWorkerJob("Transform update", { task: node.kind === "mesh" ? "triangulation" : "brush-rebuild", worker: "geometryWorker" }, 550);
+  };
+
+  const handlePreviewBrushData = (nodeId: string, brush: Brush) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node || !isBrushNode(node)) {
+      return;
+    }
+
+    node.data = structuredClone(brush);
+    editor.scene.touch();
+    setRevision((revision) => revision + 1);
+  };
+
+  const handleUpdateBrushData = (nodeId: string, brush: Brush, beforeBrush?: Brush) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node || !isBrushNode(node)) {
+      return;
+    }
+
+    editor.execute(createSetBrushDataCommand(editor.scene, nodeId, brush, beforeBrush));
+    enqueueWorkerJob("Brush edit", { task: "brush-rebuild", worker: "geometryWorker" }, 700);
+  };
+
+  const handleSplitBrushAtCoordinate = (nodeId: string, axis: TransformAxis, coordinate: number) => {
+    const { command, splitIds } = createSplitBrushNodeAtCoordinateCommand(editor.scene, nodeId, axis, coordinate);
+
+    if (splitIds.length === 0) {
+      return;
+    }
+
+    editor.execute(command);
+    editor.select(splitIds, "object");
+    enqueueWorkerJob("Clip brush", { task: "clip", worker: "geometryWorker" }, 950);
+  };
+
+  const handlePreviewMeshData = (nodeId: string, mesh: EditableMesh) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node || !isMeshNode(node)) {
+      return;
+    }
+
+    node.data = structuredClone(mesh);
+    editor.scene.touch();
+    setRevision((revision) => revision + 1);
+  };
+
+  const handleUpdateMeshData = (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node || !isMeshNode(node)) {
+      return;
+    }
+
+    editor.execute(createSetMeshDataCommand(editor.scene, nodeId, mesh, beforeMesh));
+    enqueueWorkerJob("Mesh edit", { task: "triangulation", worker: "meshWorker" }, 800);
+  };
+
+  const handlePreviewNodeTransform = (nodeId: string, transform: Transform) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node) {
+      return;
+    }
+
+    node.transform = structuredClone(transform);
+    editor.scene.touch();
+    setRevision((revision) => revision + 1);
   };
 
   const enqueueWorkerJob = (label: string, task: Parameters<typeof workerManager.enqueue>[0], durationMs?: number) => {
@@ -200,6 +294,16 @@ export function App() {
     editor.execute(command);
     editor.select(duplicateIds, "object");
     enqueueWorkerJob("Duplicate selection", { task: "triangulation", worker: "geometryWorker" }, 700);
+  };
+
+  const handleDeleteSelection = () => {
+    if (editor.selection.ids.length === 0) {
+      return;
+    }
+
+    editor.execute(createDeleteSelectionCommand(editor.scene, editor.selection.ids));
+    editor.clearSelection();
+    enqueueWorkerJob("Delete selection", { task: "brush-rebuild", worker: "geometryWorker" }, 550);
   };
 
   const handleMirrorSelection = (axis: TransformAxis) => {
@@ -281,6 +385,29 @@ export function App() {
     editor.execute(command);
     editor.select([nodeId], "object");
     enqueueWorkerJob("Asset placement", { task: "triangulation", worker: "geometryWorker" }, 650);
+  };
+
+  const handleCreateBrush = () => {
+    const snappedTarget = snapVec3(uiStore.viewport.camera.target, uiStore.viewport.grid.snapSize);
+    const { command, nodeId } = createPlaceBrushNodeCommand(
+      editor.scene,
+      makeTransform(vec3(snappedTarget.x, 1.5, snappedTarget.z))
+    );
+
+    editor.execute(command);
+    editor.select([nodeId], "object");
+    enqueueWorkerJob("Brush placement", { task: "brush-rebuild", worker: "geometryWorker" }, 650);
+  };
+
+  const handlePlaceBrush = (brush: Brush, transform: Transform) => {
+    const { command, nodeId } = createPlaceBrushNodeCommand(editor.scene, transform, {
+      data: brush,
+      name: "Blockout Brush"
+    });
+
+    editor.execute(command);
+    editor.select([nodeId], "object");
+    enqueueWorkerJob("Brush creation", { task: "brush-rebuild", worker: "geometryWorker" }, 700);
   };
 
   const handleAssignMaterial = (materialId: string) => {
@@ -474,6 +601,12 @@ export function App() {
         return;
       }
 
+      if (event.key === "Backspace" || event.key === "Delete") {
+        event.preventDefault();
+        handleDeleteSelection();
+        return;
+      }
+
       if (event.key === "1") {
         handleSetToolId("select");
         return;
@@ -485,26 +618,72 @@ export function App() {
       }
 
       if (event.key === "3") {
-        handleSetToolId("clip");
+        handleSetToolId("brush");
         return;
       }
 
       if (event.key === "4") {
-        handleSetToolId("extrude");
+        handleSetToolId("clip");
         return;
       }
 
       if (event.key === "5") {
-        handleSetToolId("mesh-edit");
+        handleSetToolId("extrude");
         return;
       }
 
       if (event.key === "6") {
+        handleSetToolId("mesh-edit");
+        return;
+      }
+
+      if (event.key === "7") {
         handleSetToolId("asset-place");
         return;
       }
 
-      if (activeToolId !== "transform") {
+      if (event.key.toLowerCase() === "b") {
+        handleSetToolId("brush");
+        return;
+      }
+
+      if (activeToolId !== "transform" && activeToolId !== "mesh-edit") {
+        return;
+      }
+
+      if (event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        setTransformMode("translate");
+        return;
+      }
+
+      if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        setTransformMode("rotate");
+        return;
+      }
+
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        setTransformMode("scale");
+        return;
+      }
+
+      if (activeToolId === "mesh-edit" && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        setMeshEditMode("vertex");
+        return;
+      }
+
+      if (activeToolId === "mesh-edit" && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        setMeshEditMode("edge");
+        return;
+      }
+
+      if (activeToolId === "mesh-edit" && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setMeshEditMode("face");
         return;
       }
 
@@ -548,6 +727,8 @@ export function App() {
         jobs={[...workerJobs, ...exportJobs]}
         onAssignMaterial={handleAssignMaterial}
         onClipSelection={handleClipSelection}
+        onCreateBrush={handleCreateBrush}
+        onDeleteSelection={handleDeleteSelection}
         onDuplicateSelection={handleDuplicateSelection}
         onClearSelection={handleClearSelection}
         onExportEngine={handleExportEngine}
@@ -558,7 +739,11 @@ export function App() {
         onMeshInflate={handleMeshInflate}
         onMirrorSelection={handleMirrorSelection}
         onPlaceAsset={handlePlaceAsset}
+        onPlaceBrush={handlePlaceBrush}
         onPlaceEntity={handlePlaceEntity}
+        onPreviewBrushData={handlePreviewBrushData}
+        onPreviewMeshData={handlePreviewMeshData}
+        onPreviewNodeTransform={handlePreviewNodeTransform}
         onRedo={handleRedo}
         onSaveWhmap={handleSaveWhmap}
         onSelectAsset={handleSelectAsset}
@@ -567,12 +752,17 @@ export function App() {
         onSetRightPanel={handleSetRightPanel}
         onSetSnapSize={handleSetSnapSize}
         onSetToolId={handleSetToolId}
+        onSplitBrushAtCoordinate={handleSplitBrushAtCoordinate}
         onTranslateSelection={handleTranslateSelection}
         onUndo={handleUndo}
+        onUpdateBrushData={handleUpdateBrushData}
+        onUpdateMeshData={handleUpdateMeshData}
         onUpdateNodeTransform={handleUpdateNodeTransform}
+        meshEditMode={meshEditMode}
         renderScene={renderScene}
         selectedAssetId={ui.selectedAssetId}
         selectedMaterialId={ui.selectedMaterialId}
+        transformMode={transformMode}
         viewport={ui.viewport}
         tools={defaultTools}
       />

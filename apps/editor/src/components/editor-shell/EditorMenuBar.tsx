@@ -14,6 +14,8 @@ type EditorMenuBarProps = {
   canRedo: boolean;
   canUndo: boolean;
   onClearSelection: () => void;
+  onCreateBrush: () => void;
+  onDeleteSelection: () => void;
   onDuplicateSelection: () => void;
   onExportEngine: () => void;
   onExportGltf: () => void;
@@ -28,6 +30,8 @@ export function EditorMenuBar({
   canRedo,
   canUndo,
   onClearSelection,
+  onCreateBrush,
+  onDeleteSelection,
   onDuplicateSelection,
   onExportEngine,
   onExportGltf,
@@ -51,6 +55,9 @@ export function EditorMenuBar({
               File
             </MenubarTrigger>
             <MenubarContent className="min-w-44 rounded-xl bg-popover/96 p-1.5 shadow-[0_18px_48px_rgba(4,12,10,0.46)] backdrop-blur-xl">
+              <MenubarItem className="rounded-lg text-xs" onClick={onCreateBrush}>
+                New Brush
+              </MenubarItem>
               <MenubarItem className="rounded-lg text-xs" onClick={onSaveWhmap}>
                 Save `.whmap`
                 <MenubarShortcut>Cmd+S</MenubarShortcut>
@@ -83,6 +90,10 @@ export function EditorMenuBar({
               <MenubarItem className="rounded-lg text-xs" onClick={onDuplicateSelection}>
                 Duplicate
                 <MenubarShortcut>Cmd+D</MenubarShortcut>
+              </MenubarItem>
+              <MenubarItem className="rounded-lg text-xs" onClick={onDeleteSelection}>
+                Delete
+                <MenubarShortcut>Del</MenubarShortcut>
               </MenubarItem>
               <MenubarItem className="rounded-lg text-xs" onClick={onClearSelection}>
                 Clear Selection

@@ -1,3 +1,5 @@
+import { Cuboid } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { GeometryNode } from "@web-hammer/shared";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FloatingPanel } from "@/components/editor-shell/FloatingPanel";
@@ -5,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 type SceneSidebarProps = {
   nodes: GeometryNode[];
+  onCreateBrush: () => void;
   onFocusNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   selectedNodeId?: string;
@@ -12,15 +15,19 @@ type SceneSidebarProps = {
 
 export function SceneSidebar({
   nodes,
+  onCreateBrush,
   onFocusNode,
   onSelectNodes,
   selectedNodeId
 }: SceneSidebarProps) {
   return (
-    <div className="pointer-events-none absolute inset-y-4 left-4 z-20 flex w-56">
+    <div className="pointer-events-none absolute inset-y-4 left-4 z-20 flex w-56 bg-black/10 backdrop-blur-md">
       <FloatingPanel className="flex min-h-0 w-full flex-col overflow-hidden">
-        <div className="px-3.5 pt-3 pb-2">
+        <div className="flex items-center justify-between px-3.5 pt-3 pb-2">
           <div className="text-[10px] font-medium tracking-[0.18em] text-foreground/42 uppercase">Scene</div>
+          <Button className="pointer-events-auto text-foreground/62" onClick={onCreateBrush} size="icon-xs" type="button" variant="ghost">
+            <Cuboid className="size-3.5" />
+          </Button>
         </div>
         <ScrollArea className="min-h-0 flex-1 px-2 pb-2">
           <div className="space-y-0.5">
