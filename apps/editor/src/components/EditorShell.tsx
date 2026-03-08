@@ -200,15 +200,17 @@ export function EditorShell({
   viewportQuality,
   viewports
 }: EditorShellProps) {
+  const selectionEnabled = physicsPlayback === "stopped";
   const nodes = Array.from(editor.scene.nodes.values());
   const entities = Array.from(editor.scene.entities.values());
   const materials = Array.from(editor.scene.materials.values());
   const assets = Array.from(editor.scene.assets.values());
-  const selectedObjectId = editor.selection.ids[0];
+  const selectedObjectId = selectionEnabled ? editor.selection.ids[0] : undefined;
   const selectedNodeId = selectedObjectId && editor.scene.getNode(selectedObjectId) ? selectedObjectId : undefined;
   const selectedNode = selectedNodeId ? editor.scene.getNode(selectedNodeId) : undefined;
   const selectedEntity = !selectedNodeId && selectedObjectId ? editor.scene.getEntity(selectedObjectId) : undefined;
-  const selectedNodes = editor.selection.ids
+  const selectedNodeIds = selectionEnabled ? editor.selection.ids : [];
+  const selectedNodes = selectedNodeIds
     .map((nodeId) => editor.scene.getNode(nodeId))
     .filter((node): node is NonNullable<typeof node> => Boolean(node));
   const activeToolLabel = tools.find((tool) => tool.id === activeToolId)?.label ?? activeToolId;
@@ -256,7 +258,7 @@ export function EditorShell({
           sceneSettings={sceneSettings}
           selectedEntity={selectedEntity}
           selectedNode={selectedNode}
-          selectedNodeIds={editor.selection.ids}
+          selectedNodeIds={selectedNodeIds}
           selectedNodes={selectedNodes}
           transformMode={transformMode}
           viewport={viewports[viewportId]}
@@ -363,6 +365,7 @@ export function EditorShell({
           onUpdateSceneSettings={onUpdateSceneSettings}
           onUpdateNodeTransform={onUpdateNodeTransform}
           sceneSettings={sceneSettings}
+          selectionEnabled={selectionEnabled}
           selectedEntity={selectedEntity}
           selectedAssetId={selectedAssetId}
           selectedFaceIds={selectedFaceIds}

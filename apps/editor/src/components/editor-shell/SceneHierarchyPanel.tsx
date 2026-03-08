@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 type SceneHierarchyPanelProps = {
   entities: Entity[];
+  interactive?: boolean;
   nodes: GeometryNode[];
   onFocusNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
@@ -14,6 +15,7 @@ type SceneHierarchyPanelProps = {
 
 export function SceneHierarchyPanel({
   entities,
+  interactive = true,
   nodes,
   onFocusNode,
   onSelectNodes,
@@ -40,6 +42,7 @@ export function SceneHierarchyPanel({
         <div className="text-[10px] font-medium tracking-[0.18em] text-foreground/42 uppercase">Scene</div>
         <Input
           className="h-9 rounded-xl border-white/8 bg-white/5 text-xs"
+          disabled={!interactive}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search scene objects"
           value={query}
@@ -52,9 +55,10 @@ export function SceneHierarchyPanel({
             filteredItems.map((item) => (
               <button
                 className={cn(
-                  "block w-full rounded-xl px-2.5 py-2 text-left text-[12px] font-medium text-foreground/62 transition-colors hover:bg-white/5 hover:text-foreground",
+                  "block w-full rounded-xl px-2.5 py-2 text-left text-[12px] font-medium text-foreground/62 transition-colors hover:bg-white/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-45",
                   selectedNodeId === item.id && "bg-emerald-500/14 text-emerald-200"
                 )}
+                disabled={!interactive}
                 key={item.id}
                 onClick={() => onSelectNodes([item.id])}
                 onDoubleClick={() => onFocusNode(item.id)}

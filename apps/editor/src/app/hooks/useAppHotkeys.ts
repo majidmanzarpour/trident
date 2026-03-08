@@ -6,6 +6,7 @@ import type { ToolId } from "@web-hammer/tool-system";
 type UseAppHotkeysOptions = {
   activeToolId: ToolId;
   editor: EditorCore;
+  enabled?: boolean;
   handleDeleteSelection: () => void;
   handleDuplicateSelection: () => void;
   handleInvertSelectionNormals: () => void;
@@ -20,6 +21,7 @@ type UseAppHotkeysOptions = {
 export function useAppHotkeys({
   activeToolId,
   editor,
+  enabled = true,
   handleDeleteSelection,
   handleDuplicateSelection,
   handleInvertSelectionNormals,
@@ -31,6 +33,10 @@ export function useAppHotkeys({
   setTransformMode
 }: UseAppHotkeysOptions) {
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
 
@@ -182,6 +188,7 @@ export function useAppHotkeys({
   }, [
     activeToolId,
     editor,
+    enabled,
     handleDeleteSelection,
     handleDuplicateSelection,
     handleInvertSelectionNormals,

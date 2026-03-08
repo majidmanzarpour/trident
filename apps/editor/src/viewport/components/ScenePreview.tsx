@@ -7,7 +7,6 @@ import {
   ConeGeometry,
   CylinderGeometry,
   FrontSide,
-  Matrix4,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -484,7 +483,12 @@ function RenderStaticMesh({
   }
 
   return (
-    <group name={`node:${mesh.nodeId}`} position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)}>
+    <group
+      name={`node:${mesh.nodeId}`}
+      position={toTuple(mesh.position)}
+      rotation={toTuple(mesh.rotation)}
+      scale={toTuple(mesh.scale)}
+    >
       <RenderMeshBody
         hovered={hovered}
         interactive={interactive}
@@ -525,7 +529,6 @@ function PhysicsPropMesh({
   selected: boolean;
 }) {
   const physics = mesh.physics;
-  const colliderArgs = useTrimeshColliderArgs(mesh);
   const colliderProps = useMemo(() => resolvePhysicsColliderProps(mesh.physics), [mesh.physics]);
 
   if (!physics || !mesh.primitive) {
@@ -549,81 +552,83 @@ function PhysicsPropMesh({
       {physics.colliderShape !== "trimesh" ? (
         <ManualCollider mesh={mesh} />
       ) : (
-        colliderArgs ? <TrimeshCollider args={colliderArgs} {...colliderProps} /> : null
+        <TrimeshPhysicsCollider colliderProps={colliderProps} mesh={mesh} />
       )}
-      <RenderMeshBody
-        hovered={hovered}
-        interactive={interactive}
-        mesh={mesh}
-        onFocusNode={onFocusNode}
-        onHoverEnd={onHoverEnd}
-        onHoverStart={onHoverStart}
-        onMeshObjectChange={onMeshObjectChange}
-        onSelectNodes={onSelectNodes}
-        renderMode={renderMode}
-        selected={selected}
-      />
+      <group scale={toTuple(mesh.scale)}>
+        <RenderMeshBody
+          hovered={hovered}
+          interactive={interactive}
+          mesh={mesh}
+          onFocusNode={onFocusNode}
+          onHoverEnd={onHoverEnd}
+          onHoverStart={onHoverStart}
+          onMeshObjectChange={onMeshObjectChange}
+          onSelectNodes={onSelectNodes}
+          renderMode={renderMode}
+          selected={selected}
+        />
+      </group>
     </RigidBody>
   );
 }
 
 function StaticPhysicsCollider({ mesh }: { mesh: DerivedRenderMesh }) {
+  return (
+    <RigidBody colliders={false} position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)} type="fixed">
+      <TrimeshPhysicsCollider mesh={mesh} />
+    </RigidBody>
+  );
+}
+
+function TrimeshPhysicsCollider({
+  colliderProps,
+  mesh
+}: {
+  colliderProps?: ReturnType<typeof resolvePhysicsColliderProps>;
+  mesh: DerivedRenderMesh;
+}) {
   const colliderArgs = useTrimeshColliderArgs(mesh);
+  const pivot = resolveMeshPivot(mesh);
 
   if (!colliderArgs) {
     return null;
   }
 
   return (
-    <RigidBody colliders={false} position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)} type="fixed">
-      <TrimeshCollider args={colliderArgs} />
-    </RigidBody>
+    <group scale={toTuple(mesh.scale)}>
+      <TrimeshCollider
+        args={colliderArgs}
+        position={[-pivot.x, -pivot.y, -pivot.z]}
+        {...colliderProps}
+      />
+    </group>
   );
 }
 
 function useTrimeshColliderArgs(mesh: DerivedRenderMesh): [ArrayLike<number>, ArrayLike<number>] | undefined {
   const geometry = useRenderableGeometry(mesh, "lit");
-  const pivot = resolveMeshPivot(mesh);
-  const bakedGeometry = useMemo(() => {
-    const sourceGeometry = geometry;
-
-    if (!sourceGeometry) {
-      return undefined;
-    }
-
-    const clonedGeometry = sourceGeometry.clone();
-    const transformMatrix = new Matrix4()
-      .makeScale(mesh.scale.x, mesh.scale.y, mesh.scale.z)
-      .multiply(new Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z));
-
-    clonedGeometry.applyMatrix4(transformMatrix);
-    clonedGeometry.computeBoundingBox();
-    clonedGeometry.computeBoundingSphere();
-
-    return clonedGeometry;
-  }, [geometry, mesh.scale.x, mesh.scale.y, mesh.scale.z, pivot.x, pivot.y, pivot.z]);
   const fallbackIndices = useMemo(() => {
-    if (!bakedGeometry) {
+    if (!geometry) {
       return new Uint32Array();
     }
 
-    const positionCount = bakedGeometry.getAttribute("position")?.count ?? 0;
+    const positionCount = geometry.getAttribute("position")?.count ?? 0;
     return Uint32Array.from({ length: positionCount }, (_, index) => index);
-  }, [bakedGeometry]);
+  }, [geometry]);
 
   useEffect(() => {
     return () => {
-      bakedGeometry?.dispose();
+      geometry?.dispose();
     };
-  }, [bakedGeometry]);
+  }, [geometry]);
 
-  if (!bakedGeometry) {
+  if (!geometry) {
     return undefined;
   }
 
   return [
-    bakedGeometry.getAttribute("position").array,
-    bakedGeometry.getIndex()?.array ?? fallbackIndices
+    geometry.getAttribute("position").array,
+    geometry.getIndex()?.array ?? fallbackIndices
   ];
 }
 
@@ -690,69 +695,67 @@ function RenderMeshBody({
   }
 
   return (
-    <group scale={toTuple(mesh.scale)}>
-      <group position={[-pivot.x, -pivot.y, -pivot.z]}>
-        <mesh
-          castShadow={renderMode === "lit"}
-          onClick={(event) => {
-            if (!interactive) {
+    <group position={[-pivot.x, -pivot.y, -pivot.z]}>
+      <mesh
+        castShadow={renderMode === "lit"}
+        onClick={(event) => {
+          if (!interactive) {
+            return;
+          }
+
+          event.stopPropagation();
+
+          if (renderMode === "wireframe") {
+            const nodeIds = resolveIntersectedIds(event.intersections);
+
+            if (nodeIds.length > 0) {
+              onSelectNodes(nodeIds);
               return;
             }
+          }
 
-            event.stopPropagation();
+          onSelectNodes([mesh.nodeId]);
+        }}
+        onDoubleClick={(event) => {
+          if (!interactive) {
+            return;
+          }
 
-            if (renderMode === "wireframe") {
-              const nodeIds = resolveIntersectedIds(event.intersections);
+          event.stopPropagation();
+          onFocusNode(mesh.nodeId);
+        }}
+        onPointerOut={(event) => {
+          if (!interactive) {
+            return;
+          }
 
-              if (nodeIds.length > 0) {
-                onSelectNodes(nodeIds);
-                return;
-              }
-            }
+          event.stopPropagation();
+          onHoverEnd();
+        }}
+        onPointerOver={(event) => {
+          if (!interactive) {
+            return;
+          }
 
-            onSelectNodes([mesh.nodeId]);
-          }}
-          onDoubleClick={(event) => {
-            if (!interactive) {
-              return;
-            }
-
-            event.stopPropagation();
-            onFocusNode(mesh.nodeId);
-          }}
-          onPointerOut={(event) => {
-            if (!interactive) {
-              return;
-            }
-
-            event.stopPropagation();
-            onHoverEnd();
-          }}
-          onPointerOver={(event) => {
-            if (!interactive) {
-              return;
-            }
-
-            event.stopPropagation();
-            onHoverStart(mesh.nodeId);
-          }}
-          ref={(object) => {
-            setMeshObject(object);
-            onMeshObjectChange(mesh.nodeId, object);
-          }}
-          receiveShadow={renderMode === "lit"}
-        >
-          <primitive attach="geometry" object={geometry} />
-          {renderMode === "wireframe" ? (
-            <meshBasicMaterial
-              color={selected ? "#f97316" : hovered ? "#67e8f9" : "#94a3b8"}
-              depthWrite={false}
-              toneMapped={false}
-              wireframe
-            />
-          ) : null}
-        </mesh>
-      </group>
+          event.stopPropagation();
+          onHoverStart(mesh.nodeId);
+        }}
+        ref={(object) => {
+          setMeshObject(object);
+          onMeshObjectChange(mesh.nodeId, object);
+        }}
+        receiveShadow={renderMode === "lit"}
+      >
+        <primitive attach="geometry" object={geometry} />
+        {renderMode === "wireframe" ? (
+          <meshBasicMaterial
+            color={selected ? "#f97316" : hovered ? "#67e8f9" : "#94a3b8"}
+            depthWrite={false}
+            toneMapped={false}
+            wireframe
+          />
+        ) : null}
+      </mesh>
     </group>
   );
 }

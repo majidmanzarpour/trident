@@ -58,6 +58,7 @@ type InspectorSidebarProps = {
   onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
   onUpdateSceneSettings: (settings: SceneSettings, beforeSettings?: SceneSettings) => void;
   sceneSettings: SceneSettings;
+  selectionEnabled: boolean;
   selectedAssetId: string;
   selectedEntity?: Entity;
   selectedFaceIds: string[];
@@ -98,6 +99,7 @@ export function InspectorSidebar({
   onUpdateNodeTransform,
   onUpdateSceneSettings,
   sceneSettings,
+  selectionEnabled,
   selectedAssetId,
   selectedEntity,
   selectedFaceIds,
@@ -239,6 +241,7 @@ export function InspectorSidebar({
               <div className="min-h-0 flex-1">
                 <SceneHierarchyPanel
                   entities={entities}
+                  interactive={selectionEnabled}
                   nodes={nodes}
                   onFocusNode={onFocusNode}
                   onSelectNodes={onSelectNodes}

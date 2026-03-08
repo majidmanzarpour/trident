@@ -115,6 +115,10 @@ export function App() {
   useEffect(() => workerManager.subscribe(setWorkerJobs), [workerManager]);
 
   const handleSelectNodes = (nodeIds: string[]) => {
+    if (physicsPlayback !== "stopped") {
+      return;
+    }
+
     editor.select(nodeIds, "object");
   };
 
@@ -741,6 +745,7 @@ export function App() {
   };
 
   const handlePlayPhysics = () => {
+    editor.clearSelection();
     setPhysicsPlayback("running");
   };
 
@@ -833,6 +838,7 @@ export function App() {
   useAppHotkeys({
     activeToolId,
     editor,
+    enabled: physicsPlayback === "stopped",
     handleDeleteSelection,
     handleDuplicateSelection,
     handleInvertSelectionNormals,
