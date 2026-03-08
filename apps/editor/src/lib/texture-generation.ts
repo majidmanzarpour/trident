@@ -1,6 +1,5 @@
 import {
   createAiTextureDraft,
-  ensureColorMapSelection,
   TEXTURE_GENERATION_MODELS,
   type GeneratedTextureDraft,
   type TextureGenerationRequest,
@@ -27,9 +26,8 @@ class TextureGenerationApiClient implements TextureGenerator {
   async generateTextures(
     request: TextureGenerationRequest
   ): Promise<GeneratedTextureDraft[]> {
-    const normalizedRequest = ensureColorMapSelection(request);
     const response = await fetch("/api/ai/textures", {
-      body: JSON.stringify(normalizedRequest),
+      body: JSON.stringify(request),
       headers: {
         "Content-Type": "application/json"
       },
@@ -55,7 +53,7 @@ class TextureGenerationApiClient implements TextureGenerator {
           ...texture,
           dataUrl: await normalizeTextureDataUrl(
             texture.dataUrl,
-            normalizedRequest.size,
+            request.size,
             texture.mimeType ?? "image/png"
           )
         })

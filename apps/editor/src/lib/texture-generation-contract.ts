@@ -113,24 +113,6 @@ export function isTextureGenerationRequest(
   );
 }
 
-export function ensureColorMapSelection(request: TextureGenerationRequest) {
-  if (
-    request.maps.normal ||
-    request.maps.metalness ||
-    request.maps.roughness
-  ) {
-    return {
-      ...request,
-      maps: {
-        ...request.maps,
-        color: true
-      }
-    };
-  }
-
-  return request;
-}
-
 export function createAiTextureDraft(
   input: Omit<GeneratedTextureDraft, "source">
 ): GeneratedTextureDraft {

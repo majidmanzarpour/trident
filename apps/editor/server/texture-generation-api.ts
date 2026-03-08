@@ -8,7 +8,6 @@ import {
   createDerivativePrompt,
   createSourceColorPrompt,
   createTextureName,
-  ensureColorMapSelection,
   isTextureGenerationRequest,
   mapFalResolution,
   type TextureGenerationRequest,
@@ -78,38 +77,48 @@ async function generateTextures(
     credentials: apiKey
   });
 
-  const normalizedRequest = ensureColorMapSelection(request);
-  if (normalizedRequest.sourceTextureDataUrl) {
+  if (request.sourceTextureDataUrl) {
     return {
       textures: await Promise.all(
         (
           ["color", "normal", "metalness", "roughness"] as const
         )
-          .filter((kind) => normalizedRequest.maps[kind])
+          .filter((kind) => request.maps[kind])
           .map((kind) =>
             generateTextureFromSource(
               kind,
-              normalizedRequest.sourceTextureDataUrl!,
-              normalizedRequest
+              request.sourceTextureDataUrl!,
+              request
             )
           )
       )
     };
   }
 
-  const colorTexture = await generateColorTexture(normalizedRequest);
   const derivativeKinds = (
     ["normal", "metalness", "roughness"] as const
-  ).filter((kind) => normalizedRequest.maps[kind]);
+  ).filter((kind) => request.maps[kind]);
+
+  const shouldGenerateColorTexture = request.maps.color || derivativeKinds.length > 0;
+
+  if (!shouldGenerateColorTexture) {
+    return {
+      textures: []
+    };
+  }
+
+  const colorTexture = await generateColorTexture(request);
 
   const derivatives = await Promise.all(
     derivativeKinds.map((kind) =>
-      generateDerivedTexture(kind, colorTexture.dataUrl, normalizedRequest)
+      generateDerivedTexture(kind, colorTexture.dataUrl, request)
     )
   );
 
   return {
-    textures: [colorTexture, ...derivatives]
+    textures: request.maps.color
+      ? [colorTexture, ...derivatives]
+      : derivatives
   };
 }
 
