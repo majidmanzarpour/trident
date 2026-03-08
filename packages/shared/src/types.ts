@@ -6,6 +6,7 @@ export type LayerID = string;
 export type FaceID = string;
 export type VertexID = string;
 export type HalfEdgeID = string;
+export type MetadataValue = string | number | boolean;
 export type PrimitiveShape = "cone" | "cube" | "cylinder" | "sphere";
 export type PrimitiveRole = "brush" | "prop";
 export type PropBodyType = "dynamic" | "fixed" | "kinematicPosition";
@@ -130,6 +131,8 @@ export type LightNodeData = {
 export type GeometryNodeBase = {
   id: NodeID;
   name: string;
+  metadata?: Record<string, MetadataValue>;
+  tags?: string[];
   transform: Transform;
 };
 
@@ -164,7 +167,7 @@ export type Asset = {
   id: AssetID;
   type: "model" | "material" | "prefab";
   path: string;
-  metadata: Record<string, string | number | boolean>;
+  metadata: Record<string, MetadataValue>;
 };
 
 export type MaterialCategory = "blockout" | "custom" | "flat";
@@ -197,7 +200,7 @@ export type Entity = {
   name: string;
   type: EntityType;
   transform: Transform;
-  properties: Record<string, string | number | boolean>;
+  properties: Record<string, MetadataValue>;
 };
 
 export type PlayerSettings = {

@@ -1,3 +1,4 @@
+export * from "./analysis";
 export * from "./commands/command-stack";
 export * from "./commands/node-commands";
 export * from "./core/editor-core";
