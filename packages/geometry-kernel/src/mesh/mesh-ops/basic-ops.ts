@@ -33,7 +33,10 @@ export function invertEditableMeshNormals(mesh: EditableMesh, faceIds?: string[]
         ? polygon.positions.slice().reverse()
         : polygon.positions.map((position) => vec3(position.x, position.y, position.z)),
     uvScale: polygon.uvScale,
-    vertexIds: [...polygon.vertexIds]
+    vertexIds:
+      !selectedFaceIds || selectedFaceIds.has(polygon.id)
+        ? polygon.vertexIds.slice().reverse()
+        : [...polygon.vertexIds]
   }));
 
   return createEditableMeshFromPolygons(polygons);

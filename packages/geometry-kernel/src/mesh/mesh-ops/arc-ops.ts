@@ -138,7 +138,7 @@ function buildArcInsertedPoints(
 
   const axis = scaleVec3(axisVector, 1 / chordLength);
   const midpoint = averageVec3([start, end]);
-  const offsetDirection = resolveArcOffsetDirection(polygons, axis, midpoint, referenceDirection, epsilon);
+  const offsetDirection = resolveArcOffsetDirection(axis, referenceDirection, epsilon);
 
   if (lengthVec3(offsetDirection) <= epsilon) {
     return undefined;
@@ -154,18 +154,14 @@ function buildArcInsertedPoints(
 }
 
 function resolveArcOffsetDirection(
-  polygons: MeshPolygonData[],
   axis: Vec3,
-  midpoint: Vec3,
   referenceDirection?: Vec3,
   epsilon = 0.0001
 ) {
-  const faceDirections = polygons
-    .map((polygon) => rejectVec3FromAxis(subVec3(polygon.center, midpoint), axis))
-    .filter((direction) => lengthVec3(direction) > epsilon);
+  const worldUpDirection = rejectVec3FromAxis(vec3(0, 1, 0), axis);
   const averagedDirection =
-    faceDirections.length > 0
-      ? normalizeVec3(averageVec3(faceDirections))
+    lengthVec3(worldUpDirection) > epsilon
+      ? normalizeVec3(worldUpDirection)
       : createPerpendicularDirection(axis, epsilon);
 
   if (!referenceDirection || lengthVec3(referenceDirection) <= epsilon) {
@@ -191,17 +187,40 @@ function sampleArcPoint(
   const radius = Math.sqrt(halfChord * halfChord + centerOffset * centerOffset);
   const center = addVec3(midpoint, scaleVec3(direction, centerOffset));
   const startAngle = Math.atan2(-centerOffset, -halfChord);
-  const minorSweep = 2 * Math.asin(Math.min(1, halfChord / radius));
-  const sweep =
-    centerOffset * offset < 0
-      ? -Math.sign(offset) * minorSweep
-      : Math.sign(offset) * (Math.PI * 2 - minorSweep);
+  const endAngle = Math.atan2(-centerOffset, halfChord);
+  let sweep = normalizeArcSweep(endAngle - startAngle);
+  const midpointSample = addVec3(
+    center,
+    addVec3(
+      scaleVec3(axis, Math.cos(startAngle + sweep * 0.5) * radius),
+      scaleVec3(direction, Math.sin(startAngle + sweep * 0.5) * radius)
+    )
+  );
+
+  if (dotVec3(subVec3(midpointSample, midpoint), direction) * offset < 0) {
+    sweep = sweep > 0 ? sweep - Math.PI * 2 : sweep + Math.PI * 2;
+  }
+
   const angle = startAngle + sweep * t;
 
   return addVec3(
     center,
     addVec3(scaleVec3(axis, Math.cos(angle) * radius), scaleVec3(direction, Math.sin(angle) * radius))
   );
+}
+
+function normalizeArcSweep(angle: number) {
+  let normalized = angle;
+
+  while (normalized <= -Math.PI) {
+    normalized += Math.PI * 2;
+  }
+
+  while (normalized > Math.PI) {
+    normalized -= Math.PI * 2;
+  }
+
+  return normalized;
 }
 
 function rejectVec3FromAxis(vector: Vec3, axis: Vec3) {

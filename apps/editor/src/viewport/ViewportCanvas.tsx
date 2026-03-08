@@ -535,19 +535,9 @@ export function ViewportCanvas({
 
     const midpoints = selectedEdgeHandles.map((handle) => averageVec3(handle.points!));
     const anchor = averageVec3(midpoints);
-    const axes = selectedEdgeHandles.map((handle) => normalizeVec3(subVec3(handle.points![1], handle.points![0])));
-    const faceHandles = createMeshEditHandles(editableMeshSource, "face");
-    const faceDirections = selectedEdgeHandles
-      .flatMap((edgeHandle) => {
-        const midpoint = averageVec3(edgeHandle.points!);
-        const axis = normalizeVec3(subVec3(edgeHandle.points![1], edgeHandle.points![0]));
-
-        return faceHandles
-          .filter((handle) => edgeHandle.vertexIds.every((vertexId) => handle.vertexIds.includes(vertexId)))
-          .map((handle) => rejectVec3FromAxis(subVec3(handle.position, midpoint), axis));
-      })
-      .filter((direction) => vec3LengthSquared(direction) > 0.000001);
-    const averageAxis = normalizeVec3(averageVec3(axes));
+    const averageAxis = normalizeVec3(
+      averageVec3(selectedEdgeHandles.map((handle) => normalizeVec3(subVec3(handle.points![1], handle.points![0]))))
+    );
     const cameraDirection = cameraRef.current.getWorldDirection(new Vector3());
     const dragPlane = new Plane().setFromNormalAndCoplanarPoint(
       cameraDirection.clone().normalize(),
@@ -562,8 +552,9 @@ export function ViewportCanvas({
         raycasterRef.current,
         dragPlane
       ) ?? new Vector3(anchor.x, anchor.y, anchor.z);
-    const averagedFaceDirection = rejectVec3FromAxis(
-      normalizeVec3(averageVec3(faceDirections)),
+    const worldUp = vec3(0, 1, 0);
+    const yDragDirection = rejectVec3FromAxis(
+      worldUp,
       vec3(cameraDirection.x, cameraDirection.y, cameraDirection.z)
     );
     const fallbackDirection = normalizeVec3(
@@ -576,7 +567,7 @@ export function ViewportCanvas({
     setArcState({
       baseMesh: structuredClone(editableMeshSource),
       dragDirection:
-        vec3LengthSquared(averagedFaceDirection) > 0.000001 ? averagedFaceDirection : fallbackDirection,
+        vec3LengthSquared(yDragDirection) > 0.000001 ? normalizeVec3(yDragDirection) : fallbackDirection,
       dragPlane,
       edges: selectedEdges,
       offset: 0,

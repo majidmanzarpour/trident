@@ -1,7 +1,7 @@
 import { triangulateEditableMesh } from "@web-hammer/geometry-kernel";
 import { type EditableMesh, type GeometryNode } from "@web-hammer/shared";
 import { useEffect, useMemo } from "react";
-import { FrontSide, WireframeGeometry } from "three";
+import { BufferGeometry, Float32BufferAttribute, FrontSide } from "three";
 import { NodeTransformGroup } from "@/viewport/components/NodeTransformGroup";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
 
@@ -22,7 +22,49 @@ export function EditableMeshPreviewOverlay({
     nextGeometry.computeVertexNormals();
     return nextGeometry;
   }, [triangulated]);
-  const wireframeGeometry = useMemo(() => (geometry ? new WireframeGeometry(geometry) : undefined), [geometry]);
+  const wireframeGeometry = useMemo(() => {
+    const verticesById = new Map(mesh.vertices.map((vertex) => [vertex.id, vertex.position] as const));
+    const segments: number[] = [];
+    const seenEdges = new Set<string>();
+
+    mesh.halfEdges.forEach((halfEdge) => {
+      if (!halfEdge.next) {
+        return;
+      }
+
+      const nextHalfEdge = mesh.halfEdges.find((candidate) => candidate.id === halfEdge.next);
+
+      if (!nextHalfEdge) {
+        return;
+      }
+
+      const start = verticesById.get(halfEdge.vertex);
+      const end = verticesById.get(nextHalfEdge.vertex);
+
+      if (!start || !end) {
+        return;
+      }
+
+      const edgeKey = halfEdge.vertex < nextHalfEdge.vertex
+        ? `${halfEdge.vertex}|${nextHalfEdge.vertex}`
+        : `${nextHalfEdge.vertex}|${halfEdge.vertex}`;
+
+      if (seenEdges.has(edgeKey)) {
+        return;
+      }
+
+      seenEdges.add(edgeKey);
+      segments.push(start.x, start.y, start.z, end.x, end.y, end.z);
+    });
+
+    if (segments.length === 0) {
+      return undefined;
+    }
+
+    const nextGeometry = new BufferGeometry();
+    nextGeometry.setAttribute("position", new Float32BufferAttribute(segments, 3));
+    return nextGeometry;
+  }, [mesh]);
 
   useEffect(
     () => () => {

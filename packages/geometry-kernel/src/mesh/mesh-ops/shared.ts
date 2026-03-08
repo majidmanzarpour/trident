@@ -466,6 +466,118 @@ export function insertPointsOnPolygonEdge(
   };
 }
 
+export function splitPolygonAlongInsertedEdge(
+  polygon: OrientedEditablePolygon & { vertexIds: VertexID[] },
+  edge: [VertexID, VertexID],
+  insertedPoints: Array<{ id: VertexID; position: Vec3 }>
+): Array<OrientedEditablePolygon & { vertexIds: VertexID[] }> {
+  const edgeIndex = findEdgeIndex(polygon.vertexIds, edge);
+
+  if (edgeIndex < 0 || insertedPoints.length === 0) {
+    return [
+      {
+        expectedNormal: polygon.expectedNormal,
+        id: polygon.id,
+        materialId: polygon.materialId,
+        positions: polygon.positions.map((position) => vec3(position.x, position.y, position.z)),
+        uvScale: polygon.uvScale,
+        vertexIds: [...polygon.vertexIds]
+      }
+    ];
+  }
+
+  const nextIndex = (edgeIndex + 1) % polygon.vertexIds.length;
+  const previousIndex = (edgeIndex - 1 + polygon.vertexIds.length) % polygon.vertexIds.length;
+  const sameOrientation = polygon.vertexIds[edgeIndex] === edge[0] && polygon.vertexIds[nextIndex] === edge[1];
+  const orderedInsertions = sameOrientation ? insertedPoints : insertedPoints.slice().reverse();
+  const anchor = {
+    id: polygon.vertexIds[previousIndex],
+    position: vec3(
+      polygon.positions[previousIndex].x,
+      polygon.positions[previousIndex].y,
+      polygon.positions[previousIndex].z
+    )
+  };
+  const chain = [
+    {
+      id: polygon.vertexIds[edgeIndex],
+      position: vec3(polygon.positions[edgeIndex].x, polygon.positions[edgeIndex].y, polygon.positions[edgeIndex].z)
+    },
+    ...orderedInsertions.map((inserted) => ({
+      id: inserted.id,
+      position: vec3(inserted.position.x, inserted.position.y, inserted.position.z)
+    })),
+    {
+      id: polygon.vertexIds[nextIndex],
+      position: vec3(polygon.positions[nextIndex].x, polygon.positions[nextIndex].y, polygon.positions[nextIndex].z)
+    }
+  ];
+  const tailVertexIds: VertexID[] = [];
+  const tailPositions: Vec3[] = [];
+
+  for (
+    let index = (nextIndex + 1) % polygon.vertexIds.length;
+    index !== previousIndex;
+    index = (index + 1) % polygon.vertexIds.length
+  ) {
+    tailVertexIds.push(polygon.vertexIds[index]);
+    tailPositions.push(vec3(polygon.positions[index].x, polygon.positions[index].y, polygon.positions[index].z));
+  }
+
+  const nextPolygons: Array<OrientedEditablePolygon & { vertexIds: VertexID[] }> = [];
+
+  for (let index = 0; index < chain.length - 2; index += 1) {
+    const triangle = createOrientedPolygon(
+      `${polygon.id}:split:${edgeIndex}:${index}`,
+      [anchor.position, chain[index].position, chain[index + 1].position],
+      polygon.expectedNormal,
+      [anchor.id, chain[index].id, chain[index + 1].id]
+    );
+
+    if (triangle?.vertexIds) {
+      nextPolygons.push({
+        expectedNormal: triangle.expectedNormal,
+        id: triangle.id,
+        materialId: polygon.materialId,
+        positions: triangle.positions,
+        uvScale: polygon.uvScale,
+        vertexIds: triangle.vertexIds
+      });
+    }
+  }
+
+  const remainder = createOrientedPolygon(
+    `${polygon.id}:split:${edgeIndex}:remainder`,
+    [anchor.position, chain[chain.length - 2].position, chain[chain.length - 1].position, ...tailPositions],
+    polygon.expectedNormal,
+    [anchor.id, chain[chain.length - 2].id, chain[chain.length - 1].id, ...tailVertexIds]
+  );
+
+  if (remainder?.vertexIds) {
+    nextPolygons.push({
+      expectedNormal: remainder.expectedNormal,
+      id: remainder.id,
+      materialId: polygon.materialId,
+      positions: remainder.positions,
+      uvScale: polygon.uvScale,
+      vertexIds: remainder.vertexIds
+    });
+  }
+
+  return nextPolygons.length > 0
+    ? nextPolygons
+    : [
+        {
+          expectedNormal: polygon.expectedNormal,
+          id: polygon.id,
+          materialId: polygon.materialId,
+          positions: polygon.positions.map((position) => vec3(position.x, position.y, position.z)),
+          uvScale: polygon.uvScale,
+          vertexIds: [...polygon.vertexIds]
+        }
+      ];
+}
+
 export function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {
   const normalizedAxis = normalizeVec3(axis);
   const cosine = Math.cos(angle);

@@ -2,6 +2,7 @@ import type { EditableMesh, FaceID, Vec3, VertexID } from "@web-hammer/shared";
 import { averageVec3, vec3 } from "@web-hammer/shared";
 import {
   createEditableMeshFromPolygons,
+  findEdgeIndex,
   getMeshPolygons,
   insertPointsOnPolygonEdge,
   lerpVec3,
@@ -77,9 +78,101 @@ function stitchBoundarySubdivisionIntoNeighbors(
   }>
 ) {
   return boundarySamples.reduce(
-    (currentPolygons, boundary) => currentPolygons.map((polygon) => insertPointsOnPolygonEdge(polygon, boundary.edge, boundary.points)),
+    (currentPolygons, boundary) =>
+      currentPolygons.flatMap((polygon) => splitSubdivisionNeighborPolygon(polygon, boundary.edge, boundary.points)),
     polygons
   );
+}
+
+function splitSubdivisionNeighborPolygon(
+  polygon: OrientedEditablePolygon & { vertexIds: VertexID[] },
+  edge: [VertexID, VertexID],
+  insertedPoints: Array<{ id: VertexID; position: Vec3 }>
+): Array<OrientedEditablePolygon & { vertexIds: VertexID[] }> {
+  const edgeIndex = findEdgeIndex(polygon.vertexIds, edge);
+
+  if (edgeIndex < 0 || insertedPoints.length === 0) {
+    return [
+      {
+        expectedNormal: polygon.expectedNormal,
+        id: polygon.id,
+        materialId: polygon.materialId,
+        positions: polygon.positions.map((position) => vec3(position.x, position.y, position.z)),
+        uvScale: polygon.uvScale,
+        vertexIds: [...polygon.vertexIds]
+      }
+    ];
+  }
+
+  if (polygon.vertexIds.length !== 4) {
+    return [insertPointsOnPolygonEdge(polygon, edge, insertedPoints)];
+  }
+
+  const nextIndex = (edgeIndex + 1) % polygon.vertexIds.length;
+  const sameOrientation = polygon.vertexIds[edgeIndex] === edge[0] && polygon.vertexIds[nextIndex] === edge[1];
+  const orderedSharedInsertions = sameOrientation ? insertedPoints : insertedPoints.slice().reverse();
+  const oppositeStartIndex = (edgeIndex + 3) % polygon.vertexIds.length;
+  const oppositeEndIndex = (edgeIndex + 2) % polygon.vertexIds.length;
+  const segmentCount = orderedSharedInsertions.length + 1;
+  const sharedChain = [
+    {
+      id: polygon.vertexIds[edgeIndex],
+      position: vec3(polygon.positions[edgeIndex].x, polygon.positions[edgeIndex].y, polygon.positions[edgeIndex].z)
+    },
+    ...orderedSharedInsertions.map((point) => ({
+      id: point.id,
+      position: vec3(point.position.x, point.position.y, point.position.z)
+    })),
+    {
+      id: polygon.vertexIds[nextIndex],
+      position: vec3(polygon.positions[nextIndex].x, polygon.positions[nextIndex].y, polygon.positions[nextIndex].z)
+    }
+  ];
+  const oppositeChain = [
+    {
+      id: polygon.vertexIds[oppositeStartIndex],
+      position: vec3(
+        polygon.positions[oppositeStartIndex].x,
+        polygon.positions[oppositeStartIndex].y,
+        polygon.positions[oppositeStartIndex].z
+      )
+    },
+    ...Array.from({ length: orderedSharedInsertions.length }, (_, index) => ({
+      id: `${polygon.id}:subdiv:bridge:${edgeIndex}:${index + 1}`,
+      position: lerpVec3(
+        polygon.positions[oppositeStartIndex],
+        polygon.positions[oppositeEndIndex],
+        (index + 1) / segmentCount
+      )
+    })),
+    {
+      id: polygon.vertexIds[oppositeEndIndex],
+      position: vec3(
+        polygon.positions[oppositeEndIndex].x,
+        polygon.positions[oppositeEndIndex].y,
+        polygon.positions[oppositeEndIndex].z
+      )
+    }
+  ];
+
+  return Array.from({ length: segmentCount }, (_, index) => ({
+    expectedNormal: polygon.expectedNormal,
+    id: `${polygon.id}:subdiv:strip:${edgeIndex}:${index}`,
+    materialId: polygon.materialId,
+    positions: [
+      sharedChain[index].position,
+      sharedChain[index + 1].position,
+      oppositeChain[index + 1].position,
+      oppositeChain[index].position
+    ],
+    uvScale: polygon.uvScale,
+    vertexIds: [
+      sharedChain[index].id,
+      sharedChain[index + 1].id,
+      oppositeChain[index + 1].id,
+      oppositeChain[index].id
+    ]
+  }));
 }
 
 function buildQuadSubdivisionPolygons(
