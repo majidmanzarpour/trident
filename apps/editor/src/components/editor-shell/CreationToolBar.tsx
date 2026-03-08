@@ -27,6 +27,10 @@ export function CreationToolBar({
   disabled = false,
   onPlaceEntity,
   onPlaceLight,
+  onPlaceBlockoutOpenRoom,
+  onPlaceBlockoutPlatform,
+  onPlaceBlockoutRoom,
+  onPlaceBlockoutStairs,
   onPlaceProp,
   onSelectBrushShape
 }: {
@@ -35,6 +39,10 @@ export function CreationToolBar({
   disabled?: boolean;
   onPlaceEntity: (type: EntityType) => void;
   onPlaceLight: (type: LightType) => void;
+  onPlaceBlockoutOpenRoom: () => void;
+  onPlaceBlockoutPlatform: () => void;
+  onPlaceBlockoutRoom: () => void;
+  onPlaceBlockoutStairs: () => void;
   onPlaceProp: (shape: PrimitiveShape) => void;
   onSelectBrushShape: (shape: PrimitiveShape) => void;
 }) {
@@ -91,6 +99,13 @@ export function CreationToolBar({
         <CreationButton disabled={disabled} icon={SpotLightIcon} label="Spot Light" onClick={() => onPlaceLight("spot")} />
         <CreationButton disabled={disabled} icon={AmbientLightIcon} label="Ambient Light" onClick={() => onPlaceLight("ambient")} />
       </CreationGroup>
+
+      <CreationGroup label="Blockout">
+        <CreationButton disabled={disabled} icon={BlockoutPlatformIcon} label="Open Platform" onClick={onPlaceBlockoutPlatform} />
+        <CreationButton disabled={disabled} icon={RoomShellIcon} label="Closed Room" onClick={onPlaceBlockoutRoom} />
+        <CreationButton disabled={disabled} icon={OpenRoomIcon} label="Open Room" onClick={onPlaceBlockoutOpenRoom} />
+        <CreationButton disabled={disabled} icon={StairBlockoutIcon} label="Blockout Stairs" onClick={onPlaceBlockoutStairs} />
+      </CreationGroup>
     </div>
   );
 }
@@ -145,5 +160,44 @@ function CreationButton({
         <div className="text-[11px] font-medium text-foreground">{label}</div>
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function BlockoutPlatformIcon(props: { className?: string }) {
+  return (
+    <svg fill="none" viewBox="0 0 24 24" {...props}>
+      <path d="M5 15.5h14v3H5z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <path d="M8 15.5v-3m8 3v-3" opacity="0.42" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+      <path d="M7 9.5h10" opacity="0.28" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function RoomShellIcon(props: { className?: string }) {
+  return (
+    <svg fill="none" viewBox="0 0 24 24" {...props}>
+      <path d="M6.5 7.5h11v10h-11z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <path d="M9.5 17.5v-4h5v4" opacity="0.38" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M8 10.5h8" opacity="0.28" stroke="currentColor" strokeLinecap="round" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function OpenRoomIcon(props: { className?: string }) {
+  return (
+    <svg fill="none" viewBox="0 0 24 24" {...props}>
+      <path d="M6.5 7.5h11v10h-11z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <path d="M10 17.5h4" opacity="0.22" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+      <path d="M17.5 12h2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function StairBlockoutIcon(props: { className?: string }) {
+  return (
+    <svg fill="none" viewBox="0 0 24 24" {...props}>
+      <path d="M6 17h4v-3h4v-3h4V8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M6 17h12" opacity="0.32" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </svg>
   );
 }

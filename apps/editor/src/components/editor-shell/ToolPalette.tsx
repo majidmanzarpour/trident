@@ -24,6 +24,10 @@ type ToolPaletteProps = {
   onMeshInflate: (factor: number) => void;
   onPlaceEntity: (type: EntityType) => void;
   onPlaceLight: (type: LightType) => void;
+  onPlaceBlockoutOpenRoom: () => void;
+  onPlaceBlockoutPlatform: () => void;
+  onPlaceBlockoutRoom: () => void;
+  onPlaceBlockoutStairs: () => void;
   onPlaceProp: (shape: PrimitiveShape) => void;
   onPlayPhysics: () => void;
   onRaiseTop: () => void;
@@ -57,6 +61,10 @@ export function ToolPalette({
   onMeshInflate,
   onPlaceEntity,
   onPlaceLight,
+  onPlaceBlockoutOpenRoom,
+  onPlaceBlockoutPlatform,
+  onPlaceBlockoutRoom,
+  onPlaceBlockoutStairs,
   onPlaceProp,
   onPlayPhysics,
   onRaiseTop,
@@ -98,6 +106,10 @@ export function ToolPalette({
               disabled={physicsPlayback !== "stopped"}
               onPlaceEntity={onPlaceEntity}
               onPlaceLight={onPlaceLight}
+              onPlaceBlockoutOpenRoom={onPlaceBlockoutOpenRoom}
+              onPlaceBlockoutPlatform={onPlaceBlockoutPlatform}
+              onPlaceBlockoutRoom={onPlaceBlockoutRoom}
+              onPlaceBlockoutStairs={onPlaceBlockoutStairs}
               onPlaceProp={onPlaceProp}
               onSelectBrushShape={onSelectBrushShape}
             />

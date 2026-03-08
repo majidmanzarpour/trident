@@ -107,12 +107,14 @@ export function ViewportCanvas({
   onPlaceBrush,
   onPlacePrimitiveNode,
   onPreviewBrushData,
+  onPreviewEntityTransform,
   onPreviewMeshData,
   onPreviewNodeTransform,
   onSelectMaterialFaces,
   onSelectNodes,
   onSplitBrushAtCoordinate,
   onUpdateBrushData,
+  onUpdateEntityTransform,
   onUpdateMeshData,
   onUpdateNodeTransform,
   onViewportChange,
@@ -1918,6 +1920,10 @@ export function ViewportCanvas({
             return;
           }
 
+          if (activeToolId === "mesh-edit") {
+            return;
+          }
+
           onClearSelection();
         }}
         shadows={renderMode === "lit"}
@@ -1956,7 +1962,7 @@ export function ViewportCanvas({
               ? [selectedNode.id]
               : []
           }
-          interactive={activeToolId !== "brush" && viewport.projection === "perspective" && editorInteractionEnabled}
+          interactive={activeToolId !== "brush" && activeToolId !== "mesh-edit" && viewport.projection === "perspective" && editorInteractionEnabled}
           onFocusNode={onFocusNode}
           onMeshObjectChange={handleMeshObjectChange}
           onSelectNode={onSelectNodes}
@@ -2062,8 +2068,11 @@ export function ViewportCanvas({
         {editorInteractionEnabled && isActiveViewport ? (
           <ObjectTransformGizmo
             activeToolId={activeToolId}
+            onPreviewEntityTransform={onPreviewEntityTransform}
             onPreviewNodeTransform={onPreviewNodeTransform}
+            onUpdateEntityTransform={onUpdateEntityTransform}
             onUpdateNodeTransform={onUpdateNodeTransform}
+            selectedEntity={selectedEntity}
             selectedNode={selectedNode}
             selectedNodeIds={selectedNodeIds}
             selectedNodes={selectedNodes}

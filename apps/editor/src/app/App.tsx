@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useSnapshot } from "valtio";
 import {
+  analyzeSceneSpatialLayout,
   axisDelta,
   createAssignMaterialCommand,
   createDeleteMaterialCommand,
@@ -9,6 +10,9 @@ import {
   createDuplicateNodesCommand,
   createEditorCore,
   createPlaceLightNodeCommand,
+  createPlaceBlockoutPlatformCommand,
+  createPlaceBlockoutRoomCommand,
+  createPlaceBlockoutStairCommand,
   createReplaceNodesCommand,
   createPlacePrimitiveNodeCommand,
   createSetBrushDataCommand,
@@ -99,7 +103,7 @@ export function App() {
   const [transformMode, setTransformMode] = useState<"rotate" | "scale" | "translate">("translate");
   const [workerManager] = useState(() => createWorkerTaskManager());
   const [workerJobs, setWorkerJobs] = useState<WorkerJob[]>([]);
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const ui = useSnapshot(uiStore);
   const toolSession = useMemo(() => createToolSession(activeToolId), [activeToolId]);
@@ -110,6 +114,7 @@ export function App() {
     editor.scene.materials.values(),
     editor.scene.assets.values()
   );
+  const spatialAnalysis = useMemo(() => analyzeSceneSpatialLayout(editor.scene), [editor, revision]);
 
   useEditorSubscriptions(editor, setRevision);
 
@@ -319,6 +324,18 @@ export function App() {
     setRevision((revision) => revision + 1);
   };
 
+  const handlePreviewEntityTransform = (entityId: string, transform: Transform) => {
+    const entity = editor.scene.getEntity(entityId);
+
+    if (!entity) {
+      return;
+    }
+
+    entity.transform = structuredClone(transform);
+    editor.scene.touch();
+    setRevision((revision) => revision + 1);
+  };
+
   const handleUpdateEntity = (entityId: string, nextEntity: Entity, beforeEntity?: Entity) => {
     const entity = editor.scene.getEntity(entityId);
 
@@ -506,6 +523,58 @@ export function App() {
     const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
 
     return vec3(snappedTarget.x, Math.max(size.y * 0.5, snappedTarget.y), snappedTarget.z);
+  };
+
+  const resolvePlacementTarget = () => {
+    const activeViewportState = resolveActiveViewportState();
+    return snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
+  };
+
+  const handlePlaceBlockoutPlatform = () => {
+    const target = resolvePlacementTarget();
+    const { command, nodeId } = createPlaceBlockoutPlatformCommand(editor.scene, {
+      name: "Open Platform",
+      position: vec3(target.x, target.y + 0.25, target.z),
+      size: vec3(8, 0.5, 8),
+      tags: ["play-space", "open-area"]
+    });
+
+    editor.execute(command);
+    editor.select([nodeId], "object");
+    enqueueWorkerJob("Blockout platform", { task: "brush-rebuild", worker: "geometryWorker" }, 650);
+  };
+
+  const handlePlaceBlockoutRoom = (openSides: Array<"east" | "north" | "south" | "top" | "west"> = []) => {
+    const target = resolvePlacementTarget();
+    const { command, nodeIds } = createPlaceBlockoutRoomCommand(editor.scene, {
+      name: openSides.length > 0 ? "Open Room" : "Closed Room",
+      openSides,
+      position: vec3(target.x, target.y, target.z),
+      size: vec3(10, 4, 10),
+      tags: [openSides.length > 0 ? "open-room" : "closed-room", "play-space"]
+    });
+
+    editor.execute(command);
+    editor.select(nodeIds, "object");
+    enqueueWorkerJob("Blockout room", { task: "brush-rebuild", worker: "geometryWorker" }, 800);
+  };
+
+  const handlePlaceBlockoutStairs = () => {
+    const target = resolvePlacementTarget();
+    const { command, nodeIds } = createPlaceBlockoutStairCommand(editor.scene, {
+      direction: "north",
+      name: "Blockout Stairs",
+      position: vec3(target.x, target.y + 0.1, target.z),
+      stepCount: 10,
+      stepHeight: 0.2,
+      tags: ["vertical-connector"],
+      treadDepth: 0.6,
+      width: 3
+    });
+
+    editor.execute(command);
+    editor.select(nodeIds, "object");
+    enqueueWorkerJob("Blockout stairs", { task: "brush-rebuild", worker: "geometryWorker" }, 850);
   };
 
   const handleCreateBrush = () => {
@@ -868,6 +937,7 @@ export function App() {
   return (
     <>
       <EditorShell
+        analysis={spatialAnalysis}
         activeRightPanel={ui.rightPanel}
         activeToolId={toolSession.toolId}
         activeBrushShape={activeBrushShape}
@@ -899,12 +969,17 @@ export function App() {
         onMirrorSelection={handleMirrorSelection}
         onPlaceAsset={handlePlaceAsset}
         onPlaceBrush={handlePlaceBrush}
+        onPlaceBlockoutOpenRoom={() => handlePlaceBlockoutRoom(["south"])}
+        onPlaceBlockoutPlatform={handlePlaceBlockoutPlatform}
+        onPlaceBlockoutRoom={() => handlePlaceBlockoutRoom()}
+        onPlaceBlockoutStairs={handlePlaceBlockoutStairs}
         onPlaceEntity={handlePlaceEntity}
         onPlaceLight={handlePlaceLight}
         onPlacePrimitiveNode={handlePlacePrimitiveNode}
         onPlaceProp={handlePlaceProp}
         onPlayPhysics={handlePlayPhysics}
         onPreviewBrushData={handlePreviewBrushData}
+        onPreviewEntityTransform={handlePreviewEntityTransform}
         onPreviewMeshData={handlePreviewMeshData}
         onPreviewNodeTransform={handlePreviewNodeTransform}
         onRedo={handleRedo}

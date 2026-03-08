@@ -1,6 +1,7 @@
-import { createAxisAlignedBrushFromBounds } from "@web-hammer/geometry-kernel";
-import type { BrushNode, MetadataValue, Vec3 } from "@web-hammer/shared";
-import { makeTransform, vec3 } from "@web-hammer/shared";
+import { computePolygonNormal, createAxisAlignedBrushFromBounds, createEditableMeshFromPolygons } from "@web-hammer/geometry-kernel";
+import type { EditableMeshPolygon } from "@web-hammer/geometry-kernel";
+import type { BrushNode, GeometryNode, MeshNode, MetadataValue, Vec3 } from "@web-hammer/shared";
+import { dotVec3, makeTransform, vec3 } from "@web-hammer/shared";
 import type { Command } from "../command-stack";
 import type { SceneDocument } from "../../document/scene-document";
 import { createDuplicateNodeId } from "./helpers";
@@ -18,8 +19,6 @@ export type BlockoutPlatformSpec = {
 };
 
 export type BlockoutRoomSpec = {
-  ceilingThickness?: number;
-  floorThickness?: number;
   materialId?: string;
   metadata?: Record<string, MetadataValue>;
   name?: string;
@@ -27,7 +26,6 @@ export type BlockoutRoomSpec = {
   position: Vec3;
   size: Vec3;
   tags?: string[];
-  wallThickness?: number;
 };
 
 export type BlockoutStairSpec = {
@@ -81,125 +79,29 @@ export function createPlaceBlockoutRoomCommand(
   nodeIds: string[];
 } {
   const groupId = createDuplicateNodeId(scene, "group:blockout:room");
-  const floorThickness = Math.max(0.1, spec.floorThickness ?? 0.25);
-  const ceilingThickness = Math.max(0.1, spec.ceilingThickness ?? 0.25);
-  const wallThickness = Math.max(0.1, spec.wallThickness ?? 0.25);
   const materialId = spec.materialId ?? "material:blockout:concrete";
-  const openSides = new Set(spec.openSides ?? []);
   const tags = dedupeTags(["blockout", "room", ...(spec.tags ?? [])]);
   const metadata = {
     ...(spec.metadata ?? {}),
     blockoutGroup: groupId,
-    blockoutKind: "room"
+    blockoutKind: "room",
+    blockoutPart: "shell"
   };
-  const outerWidth = spec.size.x + wallThickness * 2;
-  const outerDepth = spec.size.z + wallThickness * 2;
-  const nodes: BrushNode[] = [];
-
-  if (!openSides.has("bottom")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:floor`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "floor" },
-        name: `${spec.name ?? "Blockout Room"} Floor`,
-        position: vec3(spec.position.x, spec.position.y - floorThickness * 0.5, spec.position.z),
-        size: vec3(outerWidth, floorThickness, outerDepth),
-        tags: dedupeTags([...tags, "floor"])
-      })
-    );
-  }
-
-  if (!openSides.has("top")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:ceiling`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "ceiling" },
-        name: `${spec.name ?? "Blockout Room"} Ceiling`,
-        position: vec3(spec.position.x, spec.position.y + spec.size.y + ceilingThickness * 0.5, spec.position.z),
-        size: vec3(outerWidth, ceilingThickness, outerDepth),
-        tags: dedupeTags([...tags, "ceiling"])
-      })
-    );
-  }
-
-  if (!openSides.has("west")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:wall:west`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "wall", blockoutSide: "west" },
-        name: `${spec.name ?? "Blockout Room"} West Wall`,
-        position: vec3(
-          spec.position.x - (spec.size.x + wallThickness) * 0.5,
-          spec.position.y + spec.size.y * 0.5,
-          spec.position.z
-        ),
-        size: vec3(wallThickness, spec.size.y, outerDepth),
-        tags: dedupeTags([...tags, "wall", "west"])
-      })
-    );
-  }
-
-  if (!openSides.has("east")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:wall:east`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "wall", blockoutSide: "east" },
-        name: `${spec.name ?? "Blockout Room"} East Wall`,
-        position: vec3(
-          spec.position.x + (spec.size.x + wallThickness) * 0.5,
-          spec.position.y + spec.size.y * 0.5,
-          spec.position.z
-        ),
-        size: vec3(wallThickness, spec.size.y, outerDepth),
-        tags: dedupeTags([...tags, "wall", "east"])
-      })
-    );
-  }
-
-  if (!openSides.has("north")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:wall:north`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "wall", blockoutSide: "north" },
-        name: `${spec.name ?? "Blockout Room"} North Wall`,
-        position: vec3(
-          spec.position.x,
-          spec.position.y + spec.size.y * 0.5,
-          spec.position.z - (spec.size.z + wallThickness) * 0.5
-        ),
-        size: vec3(spec.size.x, spec.size.y, wallThickness),
-        tags: dedupeTags([...tags, "wall", "north"])
-      })
-    );
-  }
-
-  if (!openSides.has("south")) {
-    nodes.push(
-      createBlockoutBrushNode({
-        id: `${groupId}:wall:south`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "wall", blockoutSide: "south" },
-        name: `${spec.name ?? "Blockout Room"} South Wall`,
-        position: vec3(
-          spec.position.x,
-          spec.position.y + spec.size.y * 0.5,
-          spec.position.z + (spec.size.z + wallThickness) * 0.5
-        ),
-        size: vec3(spec.size.x, spec.size.y, wallThickness),
-        tags: dedupeTags([...tags, "wall", "south"])
-      })
-    );
-  }
+  const node = createBlockoutMeshNode({
+    id: `${groupId}:shell`,
+    materialId,
+    metadata,
+    mesh: createRoomShellMesh(spec.size, new Set(spec.openSides ?? []), `${groupId}:shell`, materialId),
+    name: spec.name ?? "Blockout Room",
+    position: spec.position,
+    rotationY: 0,
+    tags
+  });
 
   return {
-    command: createPlaceNodesCommand("place blockout room", nodes),
+    command: createPlaceNodesCommand("place blockout room", [node]),
     groupId,
-    nodeIds: nodes.map((node) => node.id)
+    nodeIds: [node.id]
   };
 }
 
@@ -225,108 +127,44 @@ export function createPlaceBlockoutStairCommand(
     blockoutDirection: direction,
     blockoutGroup: groupId,
     blockoutKind: "stairs",
+    blockoutPart: "connector",
     blockoutRise: totalRise,
     blockoutRun: totalRun,
     blockoutSteps: spec.stepCount
   };
-  const forward = resolveDirectionOffset(direction, 1);
-  const nodes: BrushNode[] = [
-    createDirectionalBrushNode({
-      depth: landingDepth,
-      id: `${groupId}:landing:lower`,
-      materialId,
-      metadata: { ...metadata, blockoutPart: "landing-lower" },
-      name: `${spec.name ?? "Blockout Stairs"} Lower Landing`,
-      position: spec.position,
-      rightSpan: spec.width,
-      tags: dedupeTags([...tags, "landing", "lower"]),
-      verticalSpan: 0.2
-    })
-  ];
-
-  for (let stepIndex = 1; stepIndex <= spec.stepCount; stepIndex += 1) {
-    const height = spec.stepHeight * stepIndex;
-    const centerOffset = landingDepth * 0.5 + (totalRun + (stepIndex - 1) * spec.treadDepth) * 0.5;
-    const center = addHorizontalOffset(spec.position, direction, centerOffset, height * 0.5);
-
-    nodes.push(
-      createDirectionalBrushNode({
-        depth: totalRun - (stepIndex - 1) * spec.treadDepth,
-        id: `${groupId}:step:${stepIndex}`,
-        materialId,
-        metadata: { ...metadata, blockoutPart: "step", blockoutStepIndex: stepIndex },
-        name: `${spec.name ?? "Blockout Stairs"} Step ${stepIndex}`,
-        position: center,
-        rightSpan: spec.width,
-        tags: dedupeTags([...tags, "step"]),
-        verticalSpan: height
-      })
-    );
-  }
-
-  const topLandingCenter = addHorizontalOffset(
-    spec.position,
-    direction,
-    landingDepth * 0.5 + totalRun + topLandingDepth * 0.5,
-    totalRise
-  );
-
-  nodes.push(
-    createDirectionalBrushNode({
-      depth: topLandingDepth,
-      id: `${groupId}:landing:upper`,
-      materialId,
-      metadata: { ...metadata, blockoutPart: "landing-upper" },
-      name: `${spec.name ?? "Blockout Stairs"} Upper Landing`,
-      position: topLandingCenter,
-      rightSpan: spec.width,
-      tags: dedupeTags([...tags, "landing", "upper"]),
-      verticalSpan: 0.2
-    })
-  );
-
-  if (forward.x !== 0 || forward.z !== 0) {
-    nodes.forEach((node) => {
-      node.metadata = {
-        ...(node.metadata ?? {}),
-        blockoutForwardX: forward.x,
-        blockoutForwardZ: forward.z
-      };
-    });
-  }
+  const node = createBlockoutMeshNode({
+    id: `${groupId}:mesh`,
+    materialId,
+    metadata,
+    mesh: createStairMesh(
+      {
+        landingDepth,
+        stepCount: spec.stepCount,
+        stepHeight: spec.stepHeight,
+        topLandingDepth,
+        treadDepth: spec.treadDepth,
+        width: spec.width
+      },
+      `${groupId}:mesh`,
+      materialId
+    ),
+    name: spec.name ?? "Blockout Stairs",
+    position: spec.position,
+    rotationY: resolveDirectionRotation(direction),
+    tags
+  });
 
   return {
-    command: createPlaceNodesCommand("place blockout stairs", nodes),
+    command: createPlaceNodesCommand("place blockout stairs", [node]),
     groupId,
-    nodeIds: nodes.map((node) => node.id),
-    topLandingCenter
+    nodeIds: [node.id],
+    topLandingCenter: addHorizontalOffset(
+      spec.position,
+      direction,
+      landingDepth * 0.5 + totalRun + topLandingDepth * 0.5,
+      totalRise
+    )
   };
-}
-
-function createDirectionalBrushNode(input: {
-  depth: number;
-  id: string;
-  materialId: string;
-  metadata: Record<string, MetadataValue>;
-  name: string;
-  position: Vec3;
-  rightSpan: number;
-  tags: string[];
-  verticalSpan: number;
-}) {
-  const isDepthAlongX = input.metadata.blockoutDirection === "east" || input.metadata.blockoutDirection === "west";
-
-  return createBlockoutBrushNode({
-    id: input.id,
-    materialId: input.materialId,
-    metadata: input.metadata,
-    name: input.name,
-    position: input.position,
-    size: isDepthAlongX
-      ? vec3(input.depth, input.verticalSpan, input.rightSpan)
-      : vec3(input.rightSpan, input.verticalSpan, input.depth),
-    tags: input.tags
-  });
 }
 
 function createBlockoutBrushNode(input: {
@@ -363,7 +201,223 @@ function createBlockoutBrushNode(input: {
   };
 }
 
-function createPlaceNodesCommand(label: string, nodes: BrushNode[]): Command {
+function createBlockoutMeshNode(input: {
+  id: string;
+  materialId: string;
+  metadata: Record<string, MetadataValue>;
+  mesh: MeshNode["data"];
+  name: string;
+  position: Vec3;
+  rotationY: number;
+  tags: string[];
+}): MeshNode {
+  const transform = makeTransform(structuredClone(input.position));
+  transform.rotation.y = input.rotationY;
+
+  return {
+    data: input.mesh,
+    id: input.id,
+    kind: "mesh",
+    metadata: structuredClone(input.metadata),
+    name: input.name,
+    tags: [...input.tags],
+    transform
+  };
+}
+
+function createRoomShellMesh(size: Vec3, openSides: Set<BlockoutOpenSide>, idPrefix: string, materialId: string) {
+  const halfWidth = Math.max(0.5, Math.abs(size.x) * 0.5);
+  const depth = Math.max(1, Math.abs(size.z));
+  const halfDepth = depth * 0.5;
+  const height = Math.max(1, Math.abs(size.y));
+  const polygons: EditableMeshPolygon[] = [];
+
+  if (!openSides.has("bottom")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:floor`,
+        [
+          vec3(-halfWidth, 0, -halfDepth),
+          vec3(-halfWidth, 0, halfDepth),
+          vec3(halfWidth, 0, halfDepth),
+          vec3(halfWidth, 0, -halfDepth)
+        ],
+        vec3(0, 1, 0)
+      )
+    );
+  }
+
+  if (!openSides.has("top")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:ceiling`,
+        [
+          vec3(-halfWidth, height, -halfDepth),
+          vec3(halfWidth, height, -halfDepth),
+          vec3(halfWidth, height, halfDepth),
+          vec3(-halfWidth, height, halfDepth)
+        ],
+        vec3(0, -1, 0)
+      )
+    );
+  }
+
+  if (!openSides.has("west")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:wall:west`,
+        [
+          vec3(-halfWidth, 0, -halfDepth),
+          vec3(-halfWidth, height, -halfDepth),
+          vec3(-halfWidth, height, halfDepth),
+          vec3(-halfWidth, 0, halfDepth)
+        ],
+        vec3(1, 0, 0)
+      )
+    );
+  }
+
+  if (!openSides.has("east")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:wall:east`,
+        [
+          vec3(halfWidth, 0, -halfDepth),
+          vec3(halfWidth, 0, halfDepth),
+          vec3(halfWidth, height, halfDepth),
+          vec3(halfWidth, height, -halfDepth)
+        ],
+        vec3(-1, 0, 0)
+      )
+    );
+  }
+
+  if (!openSides.has("north")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:wall:north`,
+        [
+          vec3(-halfWidth, 0, -halfDepth),
+          vec3(halfWidth, 0, -halfDepth),
+          vec3(halfWidth, height, -halfDepth),
+          vec3(-halfWidth, height, -halfDepth)
+        ],
+        vec3(0, 0, 1)
+      )
+    );
+  }
+
+  if (!openSides.has("south")) {
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:wall:south`,
+        [
+          vec3(-halfWidth, 0, halfDepth),
+          vec3(-halfWidth, height, halfDepth),
+          vec3(halfWidth, height, halfDepth),
+          vec3(halfWidth, 0, halfDepth)
+        ],
+        vec3(0, 0, -1)
+      )
+    );
+  }
+
+  return applyMaterialToMesh(createEditableMeshFromPolygons(polygons), polygons, materialId);
+}
+
+function createStairMesh(
+  spec: {
+    landingDepth: number;
+    stepCount: number;
+    stepHeight: number;
+    topLandingDepth: number;
+    treadDepth: number;
+    width: number;
+  },
+  idPrefix: string,
+  materialId: string
+) {
+  const totalRun = spec.stepCount * spec.treadDepth;
+  const totalRise = spec.stepCount * spec.stepHeight;
+  const baseThickness = Math.max(0.2, spec.stepHeight);
+  const startX = -spec.landingDepth * 0.5;
+  const profile: Array<{ x: number; y: number }> = [
+    { x: startX, y: -baseThickness },
+    { x: startX, y: 0 },
+    { x: spec.landingDepth * 0.5, y: 0 }
+  ];
+
+  for (let stepIndex = 1; stepIndex <= spec.stepCount; stepIndex += 1) {
+    profile.push({
+      x: spec.landingDepth * 0.5 + (stepIndex - 1) * spec.treadDepth,
+      y: stepIndex * spec.stepHeight
+    });
+    profile.push({
+      x: spec.landingDepth * 0.5 + stepIndex * spec.treadDepth,
+      y: stepIndex * spec.stepHeight
+    });
+  }
+
+  profile.push({
+    x: spec.landingDepth * 0.5 + totalRun + spec.topLandingDepth,
+    y: totalRise
+  });
+  profile.push({
+    x: spec.landingDepth * 0.5 + totalRun + spec.topLandingDepth,
+    y: -baseThickness
+  });
+
+  const halfWidth = spec.width * 0.5;
+  const polygons: EditableMeshPolygon[] = [
+    createOrientedPolygon(
+      `${idPrefix}:cap:front`,
+      profile.map((point) => vec3(point.x, point.y, -halfWidth)),
+      vec3(0, 0, -1)
+    ),
+    createOrientedPolygon(
+      `${idPrefix}:cap:back`,
+      profile.map((point) => vec3(point.x, point.y, halfWidth)),
+      vec3(0, 0, 1)
+    )
+  ];
+
+  for (let index = 0; index < profile.length; index += 1) {
+    const current = profile[index];
+    const next = profile[(index + 1) % profile.length];
+
+    polygons.push(
+      createOrientedPolygon(
+        `${idPrefix}:side:${index}`,
+        [
+          vec3(current.x, current.y, -halfWidth),
+          vec3(current.x, current.y, halfWidth),
+          vec3(next.x, next.y, halfWidth),
+          vec3(next.x, next.y, -halfWidth)
+        ],
+        quadNormalFromEdge(current, next)
+      )
+    );
+  }
+
+  return applyMaterialToMesh(createEditableMeshFromPolygons(polygons), polygons, materialId);
+}
+
+function quadNormalFromEdge(
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+) {
+  const edge = vec3(end.x - start.x, end.y - start.y, 0);
+  return vec3(edge.y, -edge.x, 0);
+}
+
+function applyMaterialToMesh(mesh: MeshNode["data"], polygons: EditableMeshPolygon[], defaultMaterialId: string) {
+  mesh.faces.forEach((face, index) => {
+    face.materialId = polygons[index]?.materialId ?? defaultMaterialId;
+  });
+  return mesh;
+}
+
+function createPlaceNodesCommand(label: string, nodes: GeometryNode[]): Command {
   return {
     label,
     execute(nextScene) {
@@ -376,6 +430,15 @@ function createPlaceNodesCommand(label: string, nodes: BrushNode[]): Command {
         nextScene.removeNode(node.id);
       });
     }
+  };
+}
+
+function createOrientedPolygon(id: string, positions: Vec3[], desiredNormal: Vec3): EditableMeshPolygon {
+  const normal = computePolygonNormal(positions);
+
+  return {
+    id,
+    positions: dotVec3(normal, desiredNormal) >= 0 ? positions : positions.slice().reverse()
   };
 }
 
@@ -398,6 +461,22 @@ function resolveDirectionOffset(direction: BlockoutDirection, amount: number) {
   }
 
   return vec3(0, 0, -amount);
+}
+
+function resolveDirectionRotation(direction: BlockoutDirection) {
+  if (direction === "east") {
+    return 0;
+  }
+
+  if (direction === "south") {
+    return Math.PI * 0.5;
+  }
+
+  if (direction === "west") {
+    return Math.PI;
+  }
+
+  return -Math.PI * 0.5;
 }
 
 function dedupeTags(tags: string[]) {

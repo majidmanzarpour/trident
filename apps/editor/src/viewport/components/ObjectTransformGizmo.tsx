@@ -1,7 +1,7 @@
 import { Billboard, TransformControls } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
-import type { GeometryNode, Transform } from "@web-hammer/shared";
+import type { Entity, GeometryNode, Transform } from "@web-hammer/shared";
 import { resolveTransformPivot, toTuple, vec3, type Vec3 } from "@web-hammer/shared";
 import { objectToTransform, rebaseTransformPivot, worldPointToNodeLocal } from "@/viewport/utils/geometry";
 import { resolveViewportSnapSize } from "@/viewport/utils/snap";
@@ -14,8 +14,11 @@ const tempPivotCameraDirection = new Vector3();
 
 export function ObjectTransformGizmo({
   activeToolId,
+  onPreviewEntityTransform,
   onPreviewNodeTransform,
+  onUpdateEntityTransform,
   onUpdateNodeTransform,
+  selectedEntity,
   selectedNode,
   selectedNodeIds,
   selectedNodes,
@@ -23,7 +26,16 @@ export function ObjectTransformGizmo({
   viewport
 }: Pick<
   ViewportCanvasProps,
-  "activeToolId" | "onPreviewNodeTransform" | "onUpdateNodeTransform" | "selectedNodeIds" | "selectedNodes" | "transformMode" | "viewport"
+  | "activeToolId"
+  | "onPreviewEntityTransform"
+  | "onPreviewNodeTransform"
+  | "onUpdateEntityTransform"
+  | "onUpdateNodeTransform"
+  | "selectedEntity"
+  | "selectedNodeIds"
+  | "selectedNodes"
+  | "transformMode"
+  | "viewport"
 > & {
   selectedNode?: GeometryNode;
 }) {
@@ -31,8 +43,11 @@ export function ObjectTransformGizmo({
   const pivotTargetRef = useRef<ThreeGroup | null>(null);
   const scene = useThree((state) => state.scene);
   const [activePivotNodeId, setActivePivotNodeId] = useState<string>();
-  const selectedNodeId = selectedNode?.id ?? selectedNodeIds[0];
-  const selectedObject = selectedNodeId ? scene.getObjectByName(`node:${selectedNodeId}`) : undefined;
+  const selectedTarget: GeometryNode | Entity | undefined = selectedNode ?? selectedEntity;
+  const selectedObjectId = selectedTarget?.id ?? selectedNodeIds[0];
+  const selectedObject = selectedObjectId
+    ? scene.getObjectByName(selectedNode ? `node:${selectedObjectId}` : `entity:${selectedObjectId}`)
+    : undefined;
   const snapSize = resolveViewportSnapSize(viewport);
   const activePivotNode = activePivotNodeId ? selectedNodes.find((node) => node.id === activePivotNodeId) : undefined;
   const pivotEditingEnabled = activeToolId === "transform" || activeToolId === "mesh-edit";
@@ -64,7 +79,7 @@ export function ObjectTransformGizmo({
         return;
       }
 
-      if (!pivotEditingEnabled || !selectedNodeId) {
+      if (!pivotEditingEnabled || !selectedNode) {
         return;
       }
 
@@ -75,7 +90,7 @@ export function ObjectTransformGizmo({
       }
 
       event.preventDefault();
-      setActivePivotNodeId(selectedNodeId);
+      setActivePivotNodeId(selectedNode.id);
       baselineTransformRef.current = undefined;
     };
 
@@ -84,15 +99,15 @@ export function ObjectTransformGizmo({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [pivotEditingEnabled, selectedNodeId]);
+  }, [pivotEditingEnabled, selectedNode]);
 
   if (!pivotEditingEnabled) {
     return null;
   }
 
-  const pivot = selectedNode ? resolveTransformPivot(selectedNode.transform) : vec3(0, 0, 0);
+  const pivot = selectedTarget ? resolveTransformPivot(selectedTarget.transform) : vec3(0, 0, 0);
   const showObjectTransformGizmo =
-    activeToolId === "transform" && !activePivotNode && Boolean(selectedNodeId && selectedObject && selectedNode);
+    activeToolId === "transform" && !activePivotNode && Boolean(selectedObjectId && selectedObject && selectedTarget);
 
   return (
     <>
@@ -167,7 +182,7 @@ export function ObjectTransformGizmo({
         />
       ) : null}
 
-      {showObjectTransformGizmo && selectedNodeId && selectedObject && selectedNode ? (
+      {showObjectTransformGizmo && selectedObjectId && selectedObject && selectedTarget ? (
         <TransformControls
           enabled
           mode={transformMode}
@@ -180,11 +195,24 @@ export function ObjectTransformGizmo({
               return;
             }
 
-            onUpdateNodeTransform(selectedNodeId, objectToTransform(selectedObject, pivot), baselineTransformRef.current);
+            const nextTransform = objectToTransform(selectedObject, pivot);
+
+            if (selectedNode) {
+              onUpdateNodeTransform(selectedObjectId, nextTransform, baselineTransformRef.current);
+            } else if (selectedEntity) {
+              onUpdateEntityTransform(selectedObjectId, nextTransform, baselineTransformRef.current);
+            }
+
             baselineTransformRef.current = undefined;
           }}
           onObjectChange={() => {
-            onPreviewNodeTransform(selectedNodeId, objectToTransform(selectedObject, pivot));
+            const nextTransform = objectToTransform(selectedObject, pivot);
+
+            if (selectedNode) {
+              onPreviewNodeTransform(selectedObjectId, nextTransform);
+            } else if (selectedEntity) {
+              onPreviewEntityTransform(selectedObjectId, nextTransform);
+            }
           }}
           rotationSnap={Math.PI / 12}
           scaleSnap={Math.max(snapSize / 16, 0.125)}

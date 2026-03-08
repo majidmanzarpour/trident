@@ -1,4 +1,4 @@
-import type { EditorCore, TransformAxis } from "@web-hammer/editor-core";
+import type { EditorCore, SceneSpatialAnalysis, TransformAxis } from "@web-hammer/editor-core";
 import type { GridSnapValue, DerivedRenderScene, ViewportState } from "@web-hammer/render-pipeline";
 import type {
   Brush,
@@ -18,6 +18,7 @@ import type { WorkerJob } from "@web-hammer/workers";
 import type { ReactNode } from "react";
 import { EditorMenuBar } from "@/components/editor-shell/EditorMenuBar";
 import { InspectorSidebar } from "@/components/editor-shell/InspectorSidebar";
+import { SpatialAnalysisPanel } from "@/components/editor-shell/SpatialAnalysisPanel";
 import { StatusBar } from "@/components/editor-shell/StatusBar";
 import { ToolPalette } from "@/components/editor-shell/ToolPalette";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -38,6 +39,7 @@ type EditorShellProps = {
   activeRightPanel: RightPanelId;
   activeToolId: ToolId;
   activeViewportId: ViewportPaneId;
+  analysis: SceneSpatialAnalysis;
   canRedo: boolean;
   canUndo: boolean;
   editor: EditorCore;
@@ -64,6 +66,10 @@ type EditorShellProps = {
   onMeshEditToolbarAction: (action: MeshEditToolbarActionRequest["kind"]) => void;
   onPlaceEntity: (type: EntityType) => void;
   onPlaceLight: (type: LightType) => void;
+  onPlaceBlockoutOpenRoom: () => void;
+  onPlaceBlockoutPlatform: () => void;
+  onPlaceBlockoutRoom: () => void;
+  onPlaceBlockoutStairs: () => void;
   onMeshInflate: (factor: number) => void;
   onMirrorSelection: (axis: TransformAxis) => void;
   onPlaceAsset: (position: { x: number; y: number; z: number }) => void;
@@ -72,6 +78,7 @@ type EditorShellProps = {
   onPlaceProp: (shape: PrimitiveShape) => void;
   onPlayPhysics: () => void;
   onPreviewBrushData: (nodeId: string, brush: Brush) => void;
+  onPreviewEntityTransform: (entityId: string, transform: Transform) => void;
   onPreviewMeshData: (nodeId: string, mesh: EditableMesh) => void;
   onRedo: () => void;
   onSaveWhmap: () => void;
@@ -123,6 +130,7 @@ export function EditorShell({
   activeRightPanel,
   activeToolId,
   activeViewportId,
+  analysis,
   canRedo,
   canUndo,
   editor,
@@ -149,6 +157,10 @@ export function EditorShell({
   onMeshEditToolbarAction,
   onPlaceEntity,
   onPlaceLight,
+  onPlaceBlockoutOpenRoom,
+  onPlaceBlockoutPlatform,
+  onPlaceBlockoutRoom,
+  onPlaceBlockoutStairs,
   onMeshInflate,
   onMirrorSelection,
   onPlaceAsset,
@@ -157,6 +169,7 @@ export function EditorShell({
   onPlaceProp,
   onPlayPhysics,
   onPreviewBrushData,
+  onPreviewEntityTransform,
   onPreviewMeshData,
   onRedo,
   onSaveWhmap,
@@ -244,12 +257,14 @@ export function EditorShell({
           onPlaceBrush={onPlaceBrush}
           onPlacePrimitiveNode={onPlacePrimitiveNode}
           onPreviewBrushData={onPreviewBrushData}
+          onPreviewEntityTransform={onPreviewEntityTransform}
           onPreviewMeshData={onPreviewMeshData}
           onPreviewNodeTransform={onPreviewNodeTransform}
           onSelectMaterialFaces={onSelectMaterialFaces}
           onSelectNodes={onSelectNodes}
           onSplitBrushAtCoordinate={onSplitBrushAtCoordinate}
           onUpdateBrushData={onUpdateBrushData}
+          onUpdateEntityTransform={onUpdateEntityTransform}
           onUpdateMeshData={onUpdateMeshData}
           onUpdateNodeTransform={onUpdateNodeTransform}
           onViewportChange={onUpdateViewport}
@@ -315,6 +330,10 @@ export function EditorShell({
           onMeshInflate={onMeshInflate}
           onPlaceEntity={onPlaceEntity}
           onPlaceLight={onPlaceLight}
+          onPlaceBlockoutOpenRoom={onPlaceBlockoutOpenRoom}
+          onPlaceBlockoutPlatform={onPlaceBlockoutPlatform}
+          onPlaceBlockoutRoom={onPlaceBlockoutRoom}
+          onPlaceBlockoutStairs={onPlaceBlockoutStairs}
           onPlaceProp={onPlaceProp}
           onPlayPhysics={onPlayPhysics}
           onRaiseTop={() => onExtrudeSelection("y", 1)}
@@ -337,6 +356,8 @@ export function EditorShell({
           transformMode={transformMode}
           viewMode={viewMode}
         />
+
+        <SpatialAnalysisPanel analysis={analysis} />
 
         <InspectorSidebar
           activeRightPanel={activeRightPanel}

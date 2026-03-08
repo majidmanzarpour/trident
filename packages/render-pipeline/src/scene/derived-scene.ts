@@ -1,4 +1,4 @@
-import type { Asset, Entity, GeometryNode, LightNodeData, Material, Vec3 } from "@web-hammer/shared";
+import type { Asset, Entity, GeometryNode, LightNodeData, Material, Transform, Vec3 } from "@web-hammer/shared";
 import { isLightNode, vec3 } from "@web-hammer/shared";
 import { createDerivedRenderMesh, type DerivedRenderMesh } from "../meshes/render-mesh";
 
@@ -7,6 +7,7 @@ export type DerivedEntityMarker = {
   entityType: Entity["type"];
   label: string;
   position: Vec3;
+  scale: Transform["scale"];
   rotation: Vec3;
   color: string;
 };
@@ -52,6 +53,7 @@ export function deriveRenderScene(
     entityType: entity.type,
     label: entity.name,
     position: entity.transform.position,
+    scale: entity.transform.scale,
     rotation: entity.transform.rotation,
     color:
       entity.type === "player-spawn"

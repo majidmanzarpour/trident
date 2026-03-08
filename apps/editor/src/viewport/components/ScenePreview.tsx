@@ -143,6 +143,8 @@ export function ScenePreview({
               onFocusNode(entity.entityId);
             }}
             position={toTuple(entity.position)}
+            rotation={toTuple(entity.rotation)}
+            scale={toTuple(entity.scale)}
           >
             <mesh position={[0, 0.8, 0]}>
               <octahedronGeometry args={[0.35, 0]} />
