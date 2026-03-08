@@ -9,6 +9,7 @@ import type {
   LightType,
   Material,
   SceneSettings,
+  TextureRecord,
   Transform,
   Vec2
 } from "@web-hammer/shared";
@@ -109,6 +110,7 @@ type EditorShellProps = {
   onUpdateSceneSettings: (settings: SceneSettings, beforeSettings?: SceneSettings) => void;
   onUpdateViewport: (viewportId: ViewportPaneId, viewport: ViewportState) => void;
   onUpsertMaterial: (material: Material) => void;
+  onUpsertTexture: (texture: TextureRecord) => void;
   onUpdateBrushData: (nodeId: string, brush: Brush, beforeBrush?: Brush) => void;
   onUpdateMeshData: (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => void;
   onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
@@ -120,6 +122,7 @@ type EditorShellProps = {
   selectedFaceIds: string[];
   selectedMaterialId: string;
   transformMode: "rotate" | "scale" | "translate";
+  textures: TextureRecord[];
   tools: Array<{ id: ToolId; label: string }>;
   viewMode: ViewModeId;
   viewportQuality: ViewportQuality;
@@ -201,6 +204,7 @@ export function EditorShell({
   onUpdateSceneSettings,
   onUpdateViewport,
   onUpsertMaterial,
+  onUpsertTexture,
   onUpdateBrushData,
   onUpdateMeshData,
   onUpdateNodeTransform,
@@ -212,6 +216,7 @@ export function EditorShell({
   selectedFaceIds,
   selectedMaterialId,
   transformMode,
+  textures,
   tools,
   viewMode,
   viewportQuality,
@@ -386,6 +391,7 @@ export function EditorShell({
           onSetUvScale={onSetUvScale}
           onTranslateSelection={onTranslateSelection}
           onUpsertMaterial={onUpsertMaterial}
+          onUpsertTexture={onUpsertTexture}
           onUpdateEntityProperties={onUpdateEntityProperties}
           onUpdateEntityTransform={onUpdateEntityTransform}
           onUpdateNodeData={onUpdateNodeData}
@@ -399,6 +405,7 @@ export function EditorShell({
           selectedMaterialId={selectedMaterialId}
           selectedNode={selectedNode}
           selectedNodeId={selectedObjectId}
+          textures={textures}
           viewportTarget={activeViewport.camera.target}
         />
 

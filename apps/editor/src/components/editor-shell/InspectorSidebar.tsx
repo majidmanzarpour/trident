@@ -11,6 +11,7 @@ import {
   type PropColliderShape,
   type PrimitiveNodeData,
   type SceneSettings,
+  type TextureRecord,
   type Transform,
   type Vec3
 } from "@web-hammer/shared";
@@ -53,6 +54,7 @@ type InspectorSidebarProps = {
   onSetUvScale: (scope: "faces" | "object", faceIds: string[], uvScale: { x: number; y: number }) => void;
   onTranslateSelection: (axis: "x" | "y" | "z", direction: -1 | 1) => void;
   onUpsertMaterial: (material: Material) => void;
+  onUpsertTexture: (texture: TextureRecord) => void;
   onUpdateEntityProperties: (entityId: string, properties: Entity["properties"]) => void;
   onUpdateEntityTransform: (entityId: string, transform: Transform, beforeTransform?: Transform) => void;
   onUpdateNodeData: (nodeId: string, data: PrimitiveNodeData | LightNodeData) => void;
@@ -66,6 +68,7 @@ type InspectorSidebarProps = {
   selectedMaterialId: string;
   selectedNode?: GeometryNode;
   selectedNodeId?: string;
+  textures: TextureRecord[];
   viewportTarget: Vec3;
 };
 
@@ -95,6 +98,7 @@ export function InspectorSidebar({
   onSetUvScale,
   onTranslateSelection,
   onUpsertMaterial,
+  onUpsertTexture,
   onUpdateEntityProperties,
   onUpdateEntityTransform,
   onUpdateNodeData,
@@ -108,6 +112,7 @@ export function InspectorSidebar({
   selectedMaterialId,
   selectedNode,
   selectedNodeId,
+  textures,
   viewportTarget
 }: InspectorSidebarProps) {
   const selectedTarget = selectedNode ?? selectedEntity;
@@ -617,9 +622,11 @@ export function InspectorSidebar({
               onSetUvOffset={onSetUvOffset}
               onSetUvScale={onSetUvScale}
               onUpsertMaterial={onUpsertMaterial}
+              onUpsertTexture={onUpsertTexture}
               selectedFaceIds={activeToolId === "mesh-edit" && meshEditMode === "face" ? selectedFaceIds : []}
               selectedMaterialId={selectedMaterialId}
               selectedNode={selectedNode}
+              textures={textures}
             />
           </TabsContent>
         </Tabs>

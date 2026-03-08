@@ -173,6 +173,23 @@ export type Asset = {
 
 export type MaterialCategory = "blockout" | "custom" | "flat";
 
+export type TextureKind = "color" | "normal" | "metalness" | "roughness";
+
+export type TextureSource = "ai" | "import" | "upload";
+
+export type TextureRecord = {
+  id: string;
+  createdAt: string;
+  dataUrl: string;
+  kind: TextureKind;
+  mimeType?: string;
+  model?: string;
+  name: string;
+  prompt?: string;
+  size?: number;
+  source: TextureSource;
+};
+
 export type Material = {
   id: MaterialID;
   name: string;

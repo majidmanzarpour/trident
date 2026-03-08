@@ -10,7 +10,8 @@ import type {
   Material,
   MaterialID,
   NodeID,
-  SceneSettings
+  SceneSettings,
+  TextureRecord
 } from "@web-hammer/shared";
 import { createDefaultSceneSettings, makeTransform, vec3 } from "@web-hammer/shared";
 
@@ -18,6 +19,7 @@ export type SceneDocument = {
   nodes: Map<NodeID, GeometryNode>;
   entities: Map<EntityID, Entity>;
   materials: Map<MaterialID, Material>;
+  textures: Map<string, TextureRecord>;
   assets: Map<AssetID, Asset>;
   layers: Map<LayerID, Layer>;
   settings: SceneSettings;
@@ -30,6 +32,8 @@ export type SceneDocument = {
   removeEntity: (id: EntityID) => Entity | undefined;
   removeMaterial: (id: MaterialID) => Material | undefined;
   setMaterial: (material: Material) => void;
+  removeTexture: (id: string) => TextureRecord | undefined;
+  setTexture: (texture: TextureRecord) => void;
   setAsset: (asset: Asset) => void;
   setLayer: (layer: Layer) => void;
   setSettings: (settings: SceneSettings) => void;
@@ -43,12 +47,14 @@ export type SceneDocumentSnapshot = {
   materials: Material[];
   nodes: GeometryNode[];
   settings: SceneSettings;
+  textures: TextureRecord[];
 };
 
 export function createSceneDocument(): SceneDocument {
   const nodes = new Map<NodeID, GeometryNode>();
   const entities = new Map<EntityID, Entity>();
   const materials = new Map<MaterialID, Material>();
+  const textures = new Map<string, TextureRecord>();
   const assets = new Map<AssetID, Asset>();
   const layers = new Map<LayerID, Layer>();
   let settings = createDefaultSceneSettings();
@@ -57,6 +63,7 @@ export function createSceneDocument(): SceneDocument {
     nodes,
     entities,
     materials,
+    textures,
     assets,
     layers,
     get settings() {
@@ -120,6 +127,22 @@ export function createSceneDocument(): SceneDocument {
       materials.set(material.id, material);
       document.touch();
     },
+    removeTexture(id) {
+      const texture = textures.get(id);
+
+      if (!texture) {
+        return undefined;
+      }
+
+      textures.delete(id);
+      document.touch();
+
+      return texture;
+    },
+    setTexture(texture) {
+      textures.set(texture.id, texture);
+      document.touch();
+    },
     setAsset(asset) {
       assets.set(asset.id, asset);
       document.touch();
@@ -142,13 +165,16 @@ export function createSceneDocument(): SceneDocument {
 }
 
 export function createSceneDocumentSnapshot(scene: SceneDocument): SceneDocumentSnapshot {
+  ensureSceneTextureLibrary(scene);
+
   return {
     assets: Array.from(scene.assets.values(), (asset) => structuredClone(asset)),
     entities: Array.from(scene.entities.values(), (entity) => structuredClone(entity)),
     layers: Array.from(scene.layers.values(), (layer) => structuredClone(layer)),
     materials: Array.from(scene.materials.values(), (material) => structuredClone(material)),
     nodes: Array.from(scene.nodes.values(), (node) => structuredClone(node)),
-    settings: structuredClone(scene.settings)
+    settings: structuredClone(scene.settings),
+    textures: Array.from(scene.textures.values(), (texture) => structuredClone(texture))
   };
 }
 
@@ -156,6 +182,7 @@ export function loadSceneDocumentSnapshot(scene: SceneDocument, snapshot: SceneD
   scene.nodes.clear();
   scene.entities.clear();
   scene.materials.clear();
+  scene.textures.clear();
   scene.assets.clear();
   scene.layers.clear();
 
@@ -168,6 +195,9 @@ export function loadSceneDocumentSnapshot(scene: SceneDocument, snapshot: SceneD
   snapshot.materials.forEach((material) => {
     scene.materials.set(material.id, structuredClone(material));
   });
+  snapshot.textures?.forEach((texture) => {
+    scene.textures.set(texture.id, structuredClone(texture));
+  });
   snapshot.assets.forEach((asset) => {
     scene.assets.set(asset.id, structuredClone(asset));
   });
@@ -175,6 +205,7 @@ export function loadSceneDocumentSnapshot(scene: SceneDocument, snapshot: SceneD
     scene.layers.set(layer.id, structuredClone(layer));
   });
   scene.settings = structuredClone(snapshot.settings ?? createDefaultSceneSettings());
+  ensureSceneTextureLibrary(scene);
 
   scene.touch();
 }
@@ -319,4 +350,61 @@ export function createSeedSceneDocument(): SceneDocument {
   document.revision = 1;
 
   return document;
+}
+
+const TEXTURE_FIELDS = [
+  "colorTexture",
+  "normalTexture",
+  "metalnessTexture",
+  "roughnessTexture"
+] as const;
+
+type TextureField = (typeof TEXTURE_FIELDS)[number];
+
+const TEXTURE_KIND_BY_FIELD: Record<TextureField, TextureRecord["kind"]> = {
+  colorTexture: "color",
+  metalnessTexture: "metalness",
+  normalTexture: "normal",
+  roughnessTexture: "roughness"
+};
+
+export function ensureSceneTextureLibrary(scene: SceneDocument) {
+  const existingDataUrls = new Set(
+    Array.from(scene.textures.values(), (texture) => texture.dataUrl)
+  );
+
+  for (const material of scene.materials.values()) {
+    for (const field of TEXTURE_FIELDS) {
+      const dataUrl = material[field];
+
+      if (!dataUrl || existingDataUrls.has(dataUrl)) {
+        continue;
+      }
+
+      const texture: TextureRecord = {
+        createdAt: new Date().toISOString(),
+        dataUrl,
+        id: `texture:${material.id}:${field}`,
+        kind: TEXTURE_KIND_BY_FIELD[field],
+        name: `${material.name} ${formatTextureKind(TEXTURE_KIND_BY_FIELD[field])}`,
+        source: "import"
+      };
+
+      scene.textures.set(texture.id, texture);
+      existingDataUrls.add(dataUrl);
+    }
+  }
+}
+
+function formatTextureKind(kind: TextureRecord["kind"]) {
+  switch (kind) {
+    case "color":
+      return "Color";
+    case "metalness":
+      return "Metalness";
+    case "normal":
+      return "Normal";
+    case "roughness":
+      return "Roughness";
+  }
 }

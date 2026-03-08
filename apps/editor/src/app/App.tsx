@@ -34,6 +34,7 @@ import {
   createSetSceneSettingsCommand,
   createTranslateNodesCommand,
   createUpsertMaterialCommand,
+  createUpsertTextureCommand,
   type TransformAxis
 } from "@web-hammer/editor-core";
 import { convertBrushToEditableMesh, invertEditableMeshNormals } from "@web-hammer/geometry-kernel";
@@ -58,6 +59,7 @@ import {
   type EntityType,
   type LightNodeData,
   type LightType,
+  type TextureRecord,
   type Vec2,
   type Vec3,
   type SceneSettings
@@ -779,6 +781,10 @@ export function App() {
     enqueueWorkerJob("Material library update", { task: "triangulation", worker: "geometryWorker" }, 350);
   };
 
+  const handleUpsertTexture = (texture: TextureRecord) => {
+    editor.execute(createUpsertTextureCommand(editor.scene, texture));
+  };
+
   const handleDeleteMaterial = (materialId: string) => {
     const fallbackMaterial = Array.from(editor.scene.materials.values()).find((material) => material.id !== materialId);
 
@@ -1028,6 +1034,7 @@ export function App() {
         onUpdateSceneSettings={handleUpdateSceneSettings}
         onUpdateViewport={handleUpdateViewport}
         onUpsertMaterial={handleUpsertMaterial}
+        onUpsertTexture={handleUpsertTexture}
         onUpdateBrushData={handleUpdateBrushData}
         onUpdateMeshData={handleUpdateMeshData}
         onUpdateNodeTransform={handleUpdateNodeTransform}
@@ -1040,6 +1047,7 @@ export function App() {
         selectedFaceIds={selectedMaterialFaceIds}
         selectedMaterialId={ui.selectedMaterialId}
         transformMode={transformMode}
+        textures={Array.from(editor.scene.textures.values())}
         tools={defaultTools}
         viewMode={ui.viewMode}
         viewportQuality={ui.viewportQuality}
