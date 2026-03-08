@@ -1126,8 +1126,8 @@ function preserveMeshMetadata(mesh: EditableMesh, existingMesh?: EditableMesh) {
   return existingMesh?.role === "prop" || existingMesh?.physics
     ? {
         ...structuredClone(mesh),
-        physics: structuredClone(existingMesh.physics),
-        role: existingMesh.role
+        physics: structuredClone(mesh.physics ?? existingMesh.physics),
+        role: mesh.role ?? existingMesh.role
       }
     : structuredClone(mesh);
 }
