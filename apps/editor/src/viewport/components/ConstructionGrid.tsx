@@ -23,15 +23,6 @@ export function ConstructionGrid({
   return (
     <group position={transform.position} rotation={transform.rotation}>
       <mesh
-        onClick={(event) => {
-          if (activeToolId !== "asset-place") {
-            return;
-          }
-
-          event.stopPropagation();
-          const snapped = snapPointToConstructionPlane(event.point, viewportPlane, viewport, snapSize);
-          onPlaceAsset(snapped);
-        }}
         receiveShadow
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, -0.05, 0]}

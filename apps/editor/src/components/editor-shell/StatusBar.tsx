@@ -53,22 +53,6 @@ export function StatusBar({
             <span>{meshEditMode} mode</span>
           </>
         ) : null}
-        <span className="text-foreground/25">/</span>
-        <span>{viewport.projection} camera</span>
-        <span className="text-foreground/25">/</span>
-        <span>{activeViewportId} pane</span>
-        <span className="text-foreground/25">/</span>
-        <span>{viewModeLabel.toLowerCase()}</span>
-        <span className="text-foreground/25">/</span>
-        <span>{snapText}</span>
-        <span className="text-foreground/25">/</span>
-        <span>presets {gridSnapValues.join(" / ")}</span>
-        <span className="text-foreground/25">/</span>
-        <span>grid {viewport.grid.size}u</span>
-        <span className="text-foreground/25">/</span>
-        <span>{interactionHint}</span>
-        <span className="text-foreground/25">/</span>
-        <span className="truncate">{focusText}</span>
       </div>
       <JobStatus jobs={jobs} />
     </div>

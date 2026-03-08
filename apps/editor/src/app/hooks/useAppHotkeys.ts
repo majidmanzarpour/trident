@@ -109,11 +109,6 @@ export function useAppHotkeys({
         return;
       }
 
-      if (event.key === "7") {
-        setActiveToolId("asset-place");
-        return;
-      }
-
       if (event.key.toLowerCase() === "+" && activeToolId !== "mesh-edit") {
         setActiveToolId("brush");
         return;

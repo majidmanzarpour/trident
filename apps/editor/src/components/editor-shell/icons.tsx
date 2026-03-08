@@ -361,8 +361,6 @@ export function toolIconFor(toolId: ToolId) {
       return ExtrudeIcon;
     case "mesh-edit":
       return MeshEditToolIcon;
-    case "asset-place":
-      return AssetPlaceIcon;
     default:
       return MousePointer2;
   }

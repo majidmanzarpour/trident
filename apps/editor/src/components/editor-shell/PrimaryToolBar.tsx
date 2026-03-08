@@ -69,8 +69,6 @@ function shortcutForPrimaryTool(toolId: ToolId) {
       return "5";
     case "brush":
       return "6";
-    case "asset-place":
-      return "7";
     default:
       return undefined;
   }
