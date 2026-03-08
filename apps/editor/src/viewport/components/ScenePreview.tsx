@@ -1,81 +1,613 @@
-import { useEffect, useMemo, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { BallCollider, CapsuleCollider, ConeCollider, CuboidCollider, CylinderCollider, MeshCollider, Physics, RigidBody, type RapierRigidBody } from "@react-three/rapier";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BoxGeometry,
+  CapsuleGeometry,
+  ConeGeometry,
   CylinderGeometry,
   FrontSide,
-  IcosahedronGeometry,
   Mesh,
   MeshStandardMaterial,
   Object3D,
   RepeatWrapping,
+  SphereGeometry,
   SRGBColorSpace,
   TextureLoader,
+  Vector3,
   type BufferGeometry
 } from "three";
-import { disableBvhRaycast, enableBvhRaycast, type DerivedRenderMesh, type DerivedRenderScene } from "@web-hammer/render-pipeline";
+import { disableBvhRaycast, enableBvhRaycast, type DerivedEntityMarker, type DerivedLight, type DerivedRenderMesh, type DerivedRenderScene } from "@web-hammer/render-pipeline";
 import { createBlockoutTextureDataUri, resolveTransformPivot, toTuple } from "@web-hammer/shared";
 import { createIndexedGeometry } from "@/viewport/utils/geometry";
 import type { ViewportRenderMode } from "@/viewport/viewports";
+import type { SceneSettings } from "@web-hammer/shared";
 
 export function ScenePreview({
   hiddenNodeIds = [],
   interactive,
-  renderMode = "lit",
   onFocusNode,
   onMeshObjectChange,
   onSelectNode,
+  physicsPlayback,
+  physicsRevision,
+  renderMode = "lit",
   renderScene,
+  sceneSettings,
   selectedNodeIds
 }: {
   hiddenNodeIds?: string[];
   interactive: boolean;
-  renderMode?: ViewportRenderMode;
   onFocusNode: (nodeId: string) => void;
   onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
   onSelectNode: (nodeIds: string[]) => void;
+  physicsPlayback: "paused" | "running" | "stopped";
+  physicsRevision: number;
+  renderMode?: ViewportRenderMode;
   renderScene: DerivedRenderScene;
+  sceneSettings: SceneSettings;
   selectedNodeIds: string[];
 }) {
   const [hoveredNodeId, setHoveredNodeId] = useState<string>();
   const hiddenIds = useMemo(() => new Set(hiddenNodeIds), [hiddenNodeIds]);
+  const physicsActive = renderMode === "lit" && physicsPlayback !== "stopped" && sceneSettings.world.physicsEnabled;
+  const playerSpawn = physicsActive ? renderScene.entityMarkers.find((entity) => entity.entityType === "player-spawn") : undefined;
+  const physicsPropMeshes = physicsActive
+    ? renderScene.meshes.filter((mesh) => !hiddenIds.has(mesh.nodeId) && mesh.primitiveRole === "prop" && mesh.physics?.enabled)
+    : [];
+  const staticMeshes = renderScene.meshes.filter(
+    (mesh) => !hiddenIds.has(mesh.nodeId) && !physicsPropMeshes.some((candidate) => candidate.nodeId === mesh.nodeId)
+  );
+  const visibleEntityMarkers =
+    physicsActive && playerSpawn
+      ? renderScene.entityMarkers.filter((entity) => entity.entityId !== playerSpawn.entityId)
+      : renderScene.entityMarkers;
 
   return (
     <>
-      {renderScene.meshes.map((mesh) =>
-        hiddenIds.has(mesh.nodeId) ? null : (
-          <RenderPrimitive
-            hovered={hoveredNodeId === mesh.nodeId}
-            interactive={interactive}
-            key={mesh.nodeId}
-            mesh={mesh}
-            onFocusNode={onFocusNode}
-            onHoverEnd={() => setHoveredNodeId(undefined)}
-            onHoverStart={setHoveredNodeId}
-            onMeshObjectChange={onMeshObjectChange}
-            onSelectNodes={onSelectNode}
-            renderMode={renderMode}
-            selected={selectedNodeIds.includes(mesh.nodeId)}
-          />
-        )
-      )}
+      {staticMeshes.map((mesh) => (
+        <RenderStaticMesh
+          hovered={hoveredNodeId === mesh.nodeId}
+          interactive={interactive}
+          key={mesh.nodeId}
+          mesh={mesh}
+          onFocusNode={onFocusNode}
+          onHoverEnd={() => setHoveredNodeId(undefined)}
+          onHoverStart={setHoveredNodeId}
+          onMeshObjectChange={onMeshObjectChange}
+          onSelectNodes={onSelectNode}
+          renderMode={renderMode}
+          selected={selectedNodeIds.includes(mesh.nodeId)}
+        />
+      ))}
 
-      {renderScene.entityMarkers.map((entity) => (
-        <group key={entity.entityId} position={toTuple(entity.position)}>
-          <mesh position={[0, 0.8, 0]}>
-            <octahedronGeometry args={[0.35, 0]} />
-            <meshStandardMaterial color={entity.color} emissive={entity.color} emissiveIntensity={0.25} />
-          </mesh>
-          <mesh position={[0, 0.35, 0]}>
-            <cylinderGeometry args={[0.08, 0.08, 0.7, 8]} />
-            <meshStandardMaterial color="#d8e0ea" metalness={0.1} roughness={0.55} />
-          </mesh>
-        </group>
+      {physicsActive ? (
+        <Physics
+          gravity={toTuple(sceneSettings.world.gravity)}
+          key={`physics:${physicsRevision}`}
+          paused={physicsPlayback !== "running"}
+          timeStep={1 / 60}
+        >
+          {staticMeshes.map((mesh) => (
+            <StaticPhysicsCollider key={`collider:${mesh.nodeId}`} mesh={mesh} />
+          ))}
+          {physicsPropMeshes.map((mesh) => (
+            <PhysicsPropMesh
+              hovered={hoveredNodeId === mesh.nodeId}
+              interactive={interactive}
+              key={`prop:${mesh.nodeId}`}
+              mesh={mesh}
+              onFocusNode={onFocusNode}
+              onHoverEnd={() => setHoveredNodeId(undefined)}
+              onHoverStart={setHoveredNodeId}
+              onMeshObjectChange={onMeshObjectChange}
+              onSelectNodes={onSelectNode}
+              renderMode={renderMode}
+              selected={selectedNodeIds.includes(mesh.nodeId)}
+            />
+          ))}
+          {playerSpawn ? (
+            <RuntimePlayer
+              physicsPlayback={physicsPlayback}
+              sceneSettings={sceneSettings}
+              spawn={playerSpawn}
+            />
+          ) : null}
+        </Physics>
+      ) : null}
+
+      {visibleEntityMarkers.map((entity) => {
+        const selected = selectedNodeIds.includes(entity.entityId);
+        const color = selected ? "#ffb35a" : entity.color;
+
+        return (
+          <group
+            key={entity.entityId}
+            name={`entity:${entity.entityId}`}
+            onClick={(event) => {
+              if (!interactive) {
+                return;
+              }
+
+              event.stopPropagation();
+              onSelectNode([entity.entityId]);
+            }}
+            onDoubleClick={(event) => {
+              if (!interactive) {
+                return;
+              }
+
+              event.stopPropagation();
+              onFocusNode(entity.entityId);
+            }}
+            position={toTuple(entity.position)}
+          >
+            <mesh position={[0, 0.8, 0]}>
+              <octahedronGeometry args={[0.35, 0]} />
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.25} />
+            </mesh>
+            <mesh position={[0, 0.35, 0]}>
+              <cylinderGeometry args={[0.08, 0.08, 0.7, 8]} />
+              <meshStandardMaterial color="#d8e0ea" metalness={0.1} roughness={0.55} />
+            </mesh>
+          </group>
+        );
+      })}
+
+      {renderScene.lights.map((light) => (
+        <RenderLightNode
+          hovered={hoveredNodeId === light.nodeId}
+          interactive={interactive}
+          key={light.nodeId}
+          light={light}
+          onFocusNode={onFocusNode}
+          onHoverEnd={() => setHoveredNodeId(undefined)}
+          onHoverStart={setHoveredNodeId}
+          onSelectNodes={onSelectNode}
+          renderMode={renderMode}
+          selected={selectedNodeIds.includes(light.nodeId)}
+        />
       ))}
     </>
   );
 }
 
-function RenderPrimitive({
+function RuntimePlayer({
+  physicsPlayback,
+  sceneSettings,
+  spawn
+}: {
+  physicsPlayback: "paused" | "running" | "stopped";
+  sceneSettings: SceneSettings;
+  spawn: DerivedEntityMarker;
+}) {
+  const bodyRef = useRef<RapierRigidBody | null>(null);
+  const keyStateRef = useRef(new Set<string>());
+  const jumpQueuedRef = useRef(false);
+  const groundedColliderHandlesRef = useRef(new Set<number>());
+  const yawRef = useRef(spawn.rotation.y);
+  const pitchRef = useRef(sceneSettings.player.cameraMode === "fps" ? 0 : -0.2);
+  const eyeAnchorRef = useRef<Object3D | null>(null);
+  const visualRef = useRef<Object3D | null>(null);
+  const cameraPositionRef = useRef(new Vector3());
+  const cameraTargetRef = useRef(new Vector3());
+  const eyeWorldPositionRef = useRef(new Vector3());
+  const lookTargetRef = useRef(new Vector3());
+  const directionRef = useRef(new Vector3());
+  const orbitDirectionRef = useRef(new Vector3());
+  const forwardRef = useRef(new Vector3());
+  const rightRef = useRef(new Vector3());
+  const moveRef = useRef(new Vector3());
+  const { camera, gl } = useThree();
+
+  const standingHeight = Math.max(1.2, sceneSettings.player.height);
+  const crouchHeight = sceneSettings.player.canCrouch
+    ? clampNumber(sceneSettings.player.crouchHeight, 0.9, standingHeight - 0.15)
+    : standingHeight;
+  const colliderRadius = useMemo(() => clampNumber(standingHeight * 0.18, 0.24, 0.42), [standingHeight]);
+  const capsuleHalfHeight = useMemo(() => Math.max(0.12, standingHeight * 0.5 - colliderRadius), [colliderRadius, standingHeight]);
+  const capsuleCylinderHeight = Math.max(0.12, standingHeight - colliderRadius * 2);
+  const footOffset = capsuleHalfHeight + colliderRadius;
+  const playerGeometry = useMemo(() => new CapsuleGeometry(colliderRadius, capsuleCylinderHeight, 6, 14), [capsuleCylinderHeight, colliderRadius]);
+  const spawnPosition = useMemo<[number, number, number]>(
+    () => [spawn.position.x, spawn.position.y + standingHeight * 0.5 + 0.04, spawn.position.z],
+    [spawn.position.x, spawn.position.y, spawn.position.z, standingHeight]
+  );
+
+  useEffect(() => {
+    return () => {
+      playerGeometry.dispose();
+    };
+  }, [playerGeometry]);
+
+  useEffect(() => {
+    yawRef.current = spawn.rotation.y;
+    pitchRef.current = sceneSettings.player.cameraMode === "fps" ? 0 : sceneSettings.player.cameraMode === "third-person" ? -0.22 : -0.78;
+  }, [sceneSettings.player.cameraMode, spawn.rotation.y]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTextInputTarget(event.target)) {
+        return;
+      }
+
+      keyStateRef.current.add(event.code);
+
+      if (event.code === "Space") {
+        jumpQueuedRef.current = true;
+        event.preventDefault();
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      keyStateRef.current.delete(event.code);
+    };
+
+    const handleWindowBlur = () => {
+      keyStateRef.current.clear();
+      jumpQueuedRef.current = false;
+      groundedColliderHandlesRef.current.clear();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    const domElement = gl.domElement;
+    const canLookAround = sceneSettings.player.cameraMode !== "top-down";
+
+    const handleCanvasClick = () => {
+      if (!canLookAround || physicsPlayback !== "running" || document.pointerLockElement === domElement) {
+        return;
+      }
+
+      void domElement.requestPointerLock();
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!canLookAround || physicsPlayback !== "running" || document.pointerLockElement !== domElement) {
+        return;
+      }
+
+      yawRef.current -= event.movementX * 0.0024;
+      pitchRef.current = clampNumber(
+        pitchRef.current - event.movementY * 0.0018,
+        sceneSettings.player.cameraMode === "fps" ? -1.35 : -1.05,
+        sceneSettings.player.cameraMode === "fps" ? 1.35 : 0.4
+      );
+    };
+
+    domElement.addEventListener("click", handleCanvasClick);
+    window.addEventListener("mousemove", handleMouseMove);
+
+    return () => {
+      domElement.removeEventListener("click", handleCanvasClick);
+      window.removeEventListener("mousemove", handleMouseMove);
+    };
+  }, [gl, physicsPlayback, sceneSettings.player.cameraMode]);
+
+  useEffect(() => {
+    const domElement = gl.domElement;
+
+    if (physicsPlayback === "running" || document.pointerLockElement !== domElement) {
+      return;
+    }
+
+    document.exitPointerLock();
+  }, [gl, physicsPlayback]);
+
+  useFrame((_, delta) => {
+    const body = bodyRef.current;
+
+    if (!body) {
+      return;
+    }
+
+    const running = physicsPlayback === "running";
+    const translation = body.translation();
+    const linearVelocity = body.linvel();
+    const keyState = keyStateRef.current;
+    const crouching = running && sceneSettings.player.canCrouch && (keyState.has("ControlLeft") || keyState.has("ControlRight") || keyState.has("KeyC"));
+    const currentHeight = crouching ? crouchHeight : standingHeight;
+    const speed = sceneSettings.player.canRun && running && (keyState.has("ShiftLeft") || keyState.has("ShiftRight"))
+      ? sceneSettings.player.runningSpeed
+      : sceneSettings.player.movementSpeed;
+    const moveInputX = (keyState.has("KeyD") || keyState.has("ArrowRight") ? 1 : 0) - (keyState.has("KeyA") || keyState.has("ArrowLeft") ? 1 : 0);
+    const moveInputZ = (keyState.has("KeyW") || keyState.has("ArrowUp") ? 1 : 0) - (keyState.has("KeyS") || keyState.has("ArrowDown") ? 1 : 0);
+    const viewDirection = resolveViewDirection(yawRef.current, sceneSettings.player.cameraMode === "top-down" ? -0.78 : pitchRef.current, directionRef.current);
+    const forwardDirection = forwardRef.current.set(viewDirection.x, 0, viewDirection.z);
+    const rightDirection = rightRef.current;
+    const moveDirection = moveRef.current.set(0, 0, 0);
+
+    if (forwardDirection.lengthSq() > 0) {
+      forwardDirection.normalize();
+    } else {
+      forwardDirection.set(0, 0, -1);
+    }
+
+    rightDirection.set(-forwardDirection.z, 0, forwardDirection.x);
+    rightDirection.normalize();
+    moveDirection
+      .addScaledVector(rightDirection, moveInputX)
+      .addScaledVector(forwardDirection, moveInputZ);
+
+    if (running) {
+      if (moveDirection.lengthSq() > 0) {
+        moveDirection.normalize().multiplyScalar(crouching ? speed * 0.58 : speed);
+      }
+
+      body.setLinvel(
+        {
+          x: moveDirection.x,
+          y: linearVelocity.y,
+          z: moveDirection.z
+        },
+        true
+      );
+
+      if (jumpQueuedRef.current) {
+        if (sceneSettings.player.canJump && groundedColliderHandlesRef.current.size > 0) {
+          const gravityMagnitude = Math.max(
+            0.001,
+            Math.hypot(sceneSettings.world.gravity.x, sceneSettings.world.gravity.y, sceneSettings.world.gravity.z)
+          );
+
+          body.setLinvel(
+            {
+              x: moveDirection.x,
+              y: Math.sqrt(2 * gravityMagnitude * sceneSettings.player.jumpHeight),
+              z: moveDirection.z
+            },
+            true
+          );
+          groundedColliderHandlesRef.current.clear();
+        }
+
+        jumpQueuedRef.current = false;
+      }
+    }
+
+    if (visualRef.current) {
+      visualRef.current.rotation.set(0, yawRef.current, 0);
+      visualRef.current.scale.y = clampNumber(currentHeight / standingHeight, 0.55, 1);
+      visualRef.current.position.y = (standingHeight - currentHeight) * -0.22;
+    }
+
+    const eyeHeight = Math.max(colliderRadius * 1.5, currentHeight * 0.92);
+    const eyePosition = eyeWorldPositionRef.current;
+
+    if (eyeAnchorRef.current) {
+      eyeAnchorRef.current.position.set(0, -standingHeight * 0.5 + eyeHeight, 0);
+      eyeAnchorRef.current.updateWorldMatrix(true, false);
+      eyeAnchorRef.current.getWorldPosition(eyePosition);
+    } else {
+      eyePosition.set(translation.x, translation.y - standingHeight * 0.5 + eyeHeight, translation.z);
+    }
+
+    cameraTargetRef.current.copy(eyePosition);
+    const nextCameraPosition = cameraPositionRef.current;
+    const nextLookTarget = lookTargetRef.current;
+
+    if (sceneSettings.player.cameraMode === "fps") {
+      nextCameraPosition.copy(eyePosition);
+      nextLookTarget.copy(eyePosition).add(viewDirection);
+      camera.position.copy(nextCameraPosition);
+      camera.lookAt(nextLookTarget);
+    } else if (sceneSettings.player.cameraMode === "third-person") {
+      const followDistance = Math.max(3.2, standingHeight * 2.7);
+
+      nextCameraPosition.copy(eyePosition).addScaledVector(viewDirection, -followDistance);
+      nextCameraPosition.y += standingHeight * 0.24;
+      camera.position.lerp(nextCameraPosition, 1 - Math.exp(-delta * 10));
+      camera.lookAt(eyePosition);
+    } else {
+      const topDownDirection = resolveViewDirection(yawRef.current, -0.78, orbitDirectionRef.current);
+      const followDistance = Math.max(8, standingHeight * 5.2);
+
+      nextCameraPosition.copy(eyePosition).addScaledVector(topDownDirection, -followDistance);
+      nextCameraPosition.y += standingHeight * 1.8;
+      camera.position.lerp(nextCameraPosition, 1 - Math.exp(-delta * 8));
+      camera.lookAt(eyePosition);
+    }
+  });
+
+  return (
+    <RigidBody
+      canSleep={false}
+      ccd
+      colliders={false}
+      linearDamping={0.8}
+      lockRotations
+      position={spawnPosition}
+      ref={bodyRef}
+      type="dynamic"
+    >
+      <CapsuleCollider args={[capsuleHalfHeight, colliderRadius]} friction={0} restitution={0} />
+      <CuboidCollider
+        args={[colliderRadius * 0.72, 0.05, colliderRadius * 0.72]}
+        onIntersectionEnter={(payload) => {
+          groundedColliderHandlesRef.current.add(payload.other.collider.handle);
+        }}
+        onIntersectionExit={(payload) => {
+          groundedColliderHandlesRef.current.delete(payload.other.collider.handle);
+        }}
+        position={[0, -(footOffset + 0.04), 0]}
+        sensor
+      />
+      <group>
+        <object3D ref={eyeAnchorRef} />
+        <group ref={visualRef} visible={sceneSettings.player.cameraMode !== "fps"}>
+          <mesh castShadow receiveShadow>
+            <primitive attach="geometry" object={playerGeometry} />
+            <meshStandardMaterial color="#7dd3fc" emissive="#0f4c81" emissiveIntensity={0.12} flatShading roughness={0.62} />
+          </mesh>
+        </group>
+      </group>
+    </RigidBody>
+  );
+}
+
+function RenderStaticMesh({
+  hovered,
+  interactive,
+  mesh,
+  onFocusNode,
+  onHoverEnd,
+  onHoverStart,
+  onMeshObjectChange,
+  onSelectNodes,
+  renderMode,
+  selected
+}: {
+  hovered: boolean;
+  interactive: boolean;
+  mesh: DerivedRenderMesh;
+  onFocusNode: (nodeId: string) => void;
+  onHoverEnd: () => void;
+  onHoverStart: (nodeId: string) => void;
+  onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
+  renderMode: ViewportRenderMode;
+  selected: boolean;
+}) {
+  if (!mesh.surface && !mesh.primitive) {
+    return null;
+  }
+
+  return (
+    <group name={`node:${mesh.nodeId}`} position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)}>
+      <RenderMeshBody
+        hovered={hovered}
+        interactive={interactive}
+        mesh={mesh}
+        onFocusNode={onFocusNode}
+        onHoverEnd={onHoverEnd}
+        onHoverStart={onHoverStart}
+        onMeshObjectChange={onMeshObjectChange}
+        onSelectNodes={onSelectNodes}
+        renderMode={renderMode}
+        selected={selected}
+      />
+    </group>
+  );
+}
+
+function PhysicsPropMesh({
+  hovered,
+  interactive,
+  mesh,
+  onFocusNode,
+  onHoverEnd,
+  onHoverStart,
+  onMeshObjectChange,
+  onSelectNodes,
+  renderMode,
+  selected
+}: {
+  hovered: boolean;
+  interactive: boolean;
+  mesh: DerivedRenderMesh;
+  onFocusNode: (nodeId: string) => void;
+  onHoverEnd: () => void;
+  onHoverStart: (nodeId: string) => void;
+  onMeshObjectChange: (nodeId: string, object: Mesh | null) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
+  renderMode: ViewportRenderMode;
+  selected: boolean;
+}) {
+  const physics = mesh.physics;
+
+  if (!physics || !mesh.primitive) {
+    return null;
+  }
+  const massProps = physics.density !== undefined ? { density: physics.density } : { mass: physics.mass };
+
+  return (
+    <RigidBody
+      angularDamping={physics.angularDamping}
+      canSleep={physics.canSleep}
+      ccd={physics.ccd}
+      colliders={physics.colliderShape === "trimesh" ? "trimesh" : false}
+      gravityScale={physics.gravityScale}
+      linearDamping={physics.linearDamping}
+      lockRotations={physics.lockRotations}
+      lockTranslations={physics.lockTranslations}
+      position={toTuple(mesh.position)}
+      rotation={toTuple(mesh.rotation)}
+      type={physics.bodyType}
+    >
+      {physics.colliderShape !== "trimesh" ? (
+        <>
+          <ManualCollider mesh={mesh} />
+          <RenderMeshBody
+            hovered={hovered}
+            interactive={interactive}
+            mesh={mesh}
+            onFocusNode={onFocusNode}
+            onHoverEnd={onHoverEnd}
+            onHoverStart={onHoverStart}
+            onMeshObjectChange={onMeshObjectChange}
+            onSelectNodes={onSelectNodes}
+            renderMode={renderMode}
+            selected={selected}
+          />
+        </>
+      ) : (
+        <RenderMeshBody
+          hovered={hovered}
+          interactive={interactive}
+          mesh={mesh}
+          onFocusNode={onFocusNode}
+          onHoverEnd={onHoverEnd}
+          onHoverStart={onHoverStart}
+          onMeshObjectChange={onMeshObjectChange}
+          onSelectNodes={onSelectNodes}
+          renderMode={renderMode}
+          selected={selected}
+        />
+      )}
+    </RigidBody>
+  );
+}
+
+function StaticPhysicsCollider({ mesh }: { mesh: DerivedRenderMesh }) {
+  const geometry = useRenderableGeometry(mesh, "lit");
+  const pivot = resolveMeshPivot(mesh);
+
+  useEffect(() => {
+    return () => {
+      geometry?.dispose();
+    };
+  }, [geometry]);
+
+  if (!geometry) {
+    return null;
+  }
+
+  return (
+    <RigidBody colliders={false} position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)} type="fixed">
+      <MeshCollider type="trimesh">
+        <group scale={toTuple(mesh.scale)}>
+          <group position={[-pivot.x, -pivot.y, -pivot.z]}>
+            <mesh geometry={geometry} raycast={() => null}>
+              <meshBasicMaterial opacity={0} transparent />
+            </mesh>
+          </group>
+        </group>
+      </MeshCollider>
+    </RigidBody>
+  );
+}
+
+function RenderMeshBody({
   hovered,
   interactive,
   mesh,
@@ -99,51 +631,9 @@ function RenderPrimitive({
   selected: boolean;
 }) {
   const [meshObject, setMeshObject] = useState<Mesh | null>(null);
-  const hasRenderableGeometry = Boolean(mesh.surface || mesh.primitive);
-  const geometry = useMemo(() => {
-    let bufferGeometry: BufferGeometry | undefined;
-
-    if (mesh.surface) {
-      bufferGeometry = createIndexedGeometry(
-        mesh.surface.positions,
-        mesh.surface.indices,
-        mesh.surface.uvs,
-        mesh.surface.groups
-      );
-    } else if (mesh.primitive?.kind === "box") {
-      bufferGeometry = new BoxGeometry(...toTuple(mesh.primitive.size));
-    } else if (mesh.primitive?.kind === "icosahedron") {
-      bufferGeometry = new IcosahedronGeometry(mesh.primitive.radius, mesh.primitive.detail);
-    } else if (mesh.primitive?.kind === "cylinder") {
-      bufferGeometry = new CylinderGeometry(
-        mesh.primitive.radiusTop,
-        mesh.primitive.radiusBottom,
-        mesh.primitive.height,
-        mesh.primitive.radialSegments
-      );
-    }
-
-    if (!bufferGeometry) {
-      return undefined;
-    }
-
-    if (renderMode === "lit") {
-      bufferGeometry.computeVertexNormals();
-    }
-    bufferGeometry.computeBoundingBox();
-    bufferGeometry.computeBoundingSphere();
-
-    return bufferGeometry;
-  }, [mesh.primitive, mesh.surface, renderMode]);
-  const previewMaterials = useMemo(() => {
-    if (renderMode !== "lit") {
-      return [];
-    }
-
-    const specs = mesh.materials ?? [mesh.material];
-
-    return specs.map((spec) => createPreviewMaterial(spec, selected, hovered));
-  }, [hovered, mesh.material, mesh.materials, renderMode, selected]);
+  const geometry = useRenderableGeometry(mesh, renderMode);
+  const previewMaterials = usePreviewMaterials(mesh, renderMode, selected, hovered);
+  const pivot = resolveMeshPivot(mesh);
 
   useEffect(() => {
     if (geometry && meshObject && mesh.bvhEnabled) {
@@ -175,23 +665,12 @@ function RenderPrimitive({
     };
   }, [geometry]);
 
-  if (!hasRenderableGeometry) {
+  if (!geometry) {
     return null;
   }
-  const pivot = resolveTransformPivot({
-    pivot: mesh.pivot,
-    position: mesh.position,
-    rotation: mesh.rotation,
-    scale: mesh.scale
-  });
 
   return (
-    <group
-      name={`node:${mesh.nodeId}`}
-      position={toTuple(mesh.position)}
-      rotation={toTuple(mesh.rotation)}
-      scale={toTuple(mesh.scale)}
-    >
+    <group scale={toTuple(mesh.scale)}>
       <group position={[-pivot.x, -pivot.y, -pivot.z]}>
         <mesh
           castShadow={renderMode === "lit"}
@@ -203,7 +682,7 @@ function RenderPrimitive({
             event.stopPropagation();
 
             if (renderMode === "wireframe") {
-              const nodeIds = resolveIntersectedNodeIds(event.intersections);
+              const nodeIds = resolveIntersectedIds(event.intersections);
 
               if (nodeIds.length > 0) {
                 onSelectNodes(nodeIds);
@@ -243,7 +722,7 @@ function RenderPrimitive({
           }}
           receiveShadow={renderMode === "lit"}
         >
-          {geometry ? <primitive attach="geometry" object={geometry} /> : null}
+          <primitive attach="geometry" object={geometry} />
           {renderMode === "wireframe" ? (
             <meshBasicMaterial
               color={selected ? "#f97316" : hovered ? "#67e8f9" : "#94a3b8"}
@@ -258,30 +737,266 @@ function RenderPrimitive({
   );
 }
 
-function resolveIntersectedNodeIds(intersections: Array<{ object: Object3D }>) {
-  const nodeIds: string[] = [];
+function RenderLightNode({
+  hovered,
+  interactive,
+  light,
+  onFocusNode,
+  onHoverEnd,
+  onHoverStart,
+  onSelectNodes,
+  renderMode,
+  selected
+}: {
+  hovered: boolean;
+  interactive: boolean;
+  light: DerivedLight;
+  onFocusNode: (nodeId: string) => void;
+  onHoverEnd: () => void;
+  onHoverStart: (nodeId: string) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
+  renderMode: ViewportRenderMode;
+  selected: boolean;
+}) {
+  const targetRef = useRef<Object3D | null>(null);
+  const lightRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (lightRef.current && targetRef.current) {
+      lightRef.current.target = targetRef.current;
+      targetRef.current.updateMatrixWorld();
+    }
+  }, [light.nodeId, light.rotation.x, light.rotation.y, light.rotation.z]);
+
+  const markerColor = selected ? "#ffb35a" : hovered ? "#d8f4f0" : light.color;
+
+  return (
+    <group
+      name={`node:${light.nodeId}`}
+      onClick={(event) => {
+        if (!interactive) {
+          return;
+        }
+
+        event.stopPropagation();
+        onSelectNodes([light.nodeId]);
+      }}
+      onDoubleClick={(event) => {
+        if (!interactive) {
+          return;
+        }
+
+        event.stopPropagation();
+        onFocusNode(light.nodeId);
+      }}
+      onPointerOut={(event) => {
+        if (!interactive) {
+          return;
+        }
+
+        event.stopPropagation();
+        onHoverEnd();
+      }}
+      onPointerOver={(event) => {
+        if (!interactive) {
+          return;
+        }
+
+        event.stopPropagation();
+        onHoverStart(light.nodeId);
+      }}
+      position={toTuple(light.position)}
+      rotation={toTuple(light.rotation)}
+    >
+      <mesh>
+        <sphereGeometry args={[0.22, 16, 16]} />
+        <meshStandardMaterial color={markerColor} emissive={markerColor} emissiveIntensity={0.35} />
+      </mesh>
+      <mesh position={[0, -0.4, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 0.45, 8]} />
+        <meshStandardMaterial color="#d8e0ea" metalness={0.1} roughness={0.55} />
+      </mesh>
+
+      {renderMode === "lit" && light.data.enabled ? (
+        <>
+          {light.data.type === "ambient" ? (
+            <ambientLight color={light.data.color} intensity={light.data.intensity} />
+          ) : null}
+          {light.data.type === "hemisphere" ? (
+            <hemisphereLight
+              args={[light.data.color, light.data.groundColor ?? "#0f1721", light.data.intensity]}
+            />
+          ) : null}
+          {light.data.type === "point" ? (
+            <pointLight
+              castShadow={light.data.castShadow}
+              color={light.data.color}
+              decay={light.data.decay}
+              distance={light.data.distance}
+              intensity={light.data.intensity}
+            />
+          ) : null}
+          {light.data.type === "directional" ? (
+            <>
+              <directionalLight
+                castShadow={light.data.castShadow}
+                color={light.data.color}
+                intensity={light.data.intensity}
+                ref={lightRef}
+              />
+              <object3D ref={targetRef} position={[0, 0, -6]} />
+            </>
+          ) : null}
+          {light.data.type === "spot" ? (
+            <>
+              <spotLight
+                angle={light.data.angle}
+                castShadow={light.data.castShadow}
+                color={light.data.color}
+                decay={light.data.decay}
+                distance={light.data.distance}
+                intensity={light.data.intensity}
+                penumbra={light.data.penumbra}
+                ref={lightRef}
+              />
+              <object3D ref={targetRef} position={[0, 0, -6]} />
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </group>
+  );
+}
+
+function ManualCollider({ mesh }: { mesh: DerivedRenderMesh }) {
+  const pivot = resolveMeshPivot(mesh);
+  const massProps = mesh.physics?.density !== undefined ? { density: mesh.physics.density } : { mass: mesh.physics?.mass };
+  const commonProps = {
+    contactSkin: mesh.physics?.contactSkin,
+    friction: mesh.physics?.friction,
+    position: [-pivot.x, -pivot.y, -pivot.z] as [number, number, number],
+    restitution: mesh.physics?.restitution,
+    scale: toTuple(mesh.scale),
+    sensor: mesh.physics?.sensor,
+    ...massProps
+  };
+
+  if (!mesh.primitive || !mesh.physics) {
+    return null;
+  }
+
+  if (mesh.physics.colliderShape === "ball" && mesh.primitive.kind === "sphere") {
+    return <BallCollider args={[mesh.primitive.radius]} {...commonProps} />;
+  }
+
+  if (mesh.physics.colliderShape === "cuboid" && mesh.primitive.kind === "box") {
+    return (
+      <CuboidCollider
+        args={[mesh.primitive.size.x * 0.5, mesh.primitive.size.y * 0.5, mesh.primitive.size.z * 0.5]}
+        {...commonProps}
+      />
+    );
+  }
+
+  if (mesh.physics.colliderShape === "cylinder" && mesh.primitive.kind === "cylinder") {
+    return <CylinderCollider args={[mesh.primitive.height * 0.5, Math.max(mesh.primitive.radiusTop, mesh.primitive.radiusBottom)]} {...commonProps} />;
+  }
+
+  if (mesh.physics.colliderShape === "cone" && mesh.primitive.kind === "cone") {
+    return <ConeCollider args={[mesh.primitive.height * 0.5, mesh.primitive.radius]} {...commonProps} />;
+  }
+
+  return null;
+}
+
+function useRenderableGeometry(mesh: DerivedRenderMesh, renderMode: ViewportRenderMode) {
+  return useMemo(() => {
+    let bufferGeometry: BufferGeometry | undefined;
+
+    if (mesh.surface) {
+      bufferGeometry = createIndexedGeometry(mesh.surface.positions, mesh.surface.indices, mesh.surface.uvs, mesh.surface.groups);
+    } else if (mesh.primitive?.kind === "box") {
+      bufferGeometry = new BoxGeometry(...toTuple(mesh.primitive.size));
+    } else if (mesh.primitive?.kind === "sphere") {
+      bufferGeometry = new SphereGeometry(mesh.primitive.radius, mesh.primitive.widthSegments, mesh.primitive.heightSegments);
+    } else if (mesh.primitive?.kind === "cylinder") {
+      bufferGeometry = new CylinderGeometry(
+        mesh.primitive.radiusTop,
+        mesh.primitive.radiusBottom,
+        mesh.primitive.height,
+        mesh.primitive.radialSegments
+      );
+    } else if (mesh.primitive?.kind === "cone") {
+      bufferGeometry = new ConeGeometry(mesh.primitive.radius, mesh.primitive.height, mesh.primitive.radialSegments);
+    }
+
+    if (!bufferGeometry) {
+      return undefined;
+    }
+
+    if (renderMode === "lit") {
+      bufferGeometry.computeVertexNormals();
+    }
+    bufferGeometry.computeBoundingBox();
+    bufferGeometry.computeBoundingSphere();
+
+    return bufferGeometry;
+  }, [mesh.primitive, mesh.surface, renderMode]);
+}
+
+function usePreviewMaterials(
+  mesh: DerivedRenderMesh,
+  renderMode: ViewportRenderMode,
+  selected: boolean,
+  hovered: boolean
+) {
+  return useMemo(() => {
+    if (renderMode !== "lit") {
+      return [];
+    }
+
+    const specs = mesh.materials ?? [mesh.material];
+    return specs.map((spec) => createPreviewMaterial(spec, selected, hovered));
+  }, [hovered, mesh.material, mesh.materials, renderMode, selected]);
+}
+
+function resolveMeshPivot(mesh: DerivedRenderMesh) {
+  return resolveTransformPivot({
+    pivot: mesh.pivot,
+    position: mesh.position,
+    rotation: mesh.rotation,
+    scale: mesh.scale
+  });
+}
+
+function resolveIntersectedIds(intersections: Array<{ object: Object3D }>) {
+  const ids: string[] = [];
   const seen = new Set<string>();
 
   intersections.forEach((intersection) => {
-    const nodeId = resolveNodeIdFromObject(intersection.object);
+    const id = resolveSceneObjectIdFromObject(intersection.object);
 
-    if (!nodeId || seen.has(nodeId)) {
+    if (!id || seen.has(id)) {
       return;
     }
 
-    seen.add(nodeId);
-    nodeIds.push(nodeId);
+    seen.add(id);
+    ids.push(id);
   });
 
-  return nodeIds;
+  return ids;
 }
 
-function resolveNodeIdFromObject(object: Object3D | null) {
+function resolveSceneObjectIdFromObject(object: Object3D | null) {
   let current: Object3D | null = object;
 
   while (current) {
     if (current.name.startsWith("node:")) {
       return current.name.slice(5);
+    }
+
+    if (current.name.startsWith("entity:")) {
+      return current.name.slice(7);
     }
 
     current = current.parent;
@@ -300,7 +1015,7 @@ function createPreviewMaterial(spec: DerivedRenderMesh["material"], selected: bo
   const metalnessTexture = spec.metalnessTexture ? loadTexture(spec.metalnessTexture, false) : undefined;
   const roughnessTexture = spec.roughnessTexture ? loadTexture(spec.roughnessTexture, false) : undefined;
 
-  const materialOptions = {
+  return new MeshStandardMaterial({
     color: colorTexture ? "#ffffff" : selected ? "#ffb35a" : hovered ? "#d8f4f0" : spec.color,
     emissive: selected ? "#f69036" : hovered ? "#2a7f74" : "#000000",
     emissiveIntensity: selected ? 0.38 : hovered ? 0.14 : 0,
@@ -313,9 +1028,7 @@ function createPreviewMaterial(spec: DerivedRenderMesh["material"], selected: bo
     ...(metalnessTexture ? { metalnessMap: metalnessTexture } : {}),
     ...(normalTexture ? { normalMap: normalTexture } : {}),
     ...(roughnessTexture ? { roughnessMap: roughnessTexture } : {})
-  };
-
-  return new MeshStandardMaterial(materialOptions);
+  });
 }
 
 function disposePreviewMaterial(material: MeshStandardMaterial) {
@@ -336,4 +1049,25 @@ function loadTexture(source: string, isColor: boolean) {
   }
 
   return texture;
+}
+
+function resolveViewDirection(yaw: number, pitch: number, target: Vector3) {
+  return target.set(
+    -Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch)
+  ).normalize();
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function isTextInputTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable
+  );
 }

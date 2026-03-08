@@ -1,6 +1,16 @@
 import type { EdgeBevelProfile } from "@web-hammer/geometry-kernel";
 import type { DerivedRenderScene, ViewportState } from "@web-hammer/render-pipeline";
-import type { Brush, EditableMesh, GeometryNode, Transform, Vec3 } from "@web-hammer/shared";
+import type {
+  Brush,
+  EditableMesh,
+  Entity,
+  GeometryNode,
+  PrimitiveNodeData,
+  PrimitiveShape,
+  SceneSettings,
+  Transform,
+  Vec3
+} from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
 import type { BrushExtrudeHandle, MeshEditMode, MeshExtrudeHandle } from "@/viewport/editing";
 import type { ConstructionPlane, ViewportPaneId, ViewportRenderMode } from "@/viewport/viewports";
@@ -23,6 +33,7 @@ export type MeshEditToolbarActionRequest = {
 };
 
 export type ViewportCanvasProps = {
+  activeBrushShape: PrimitiveShape;
   activeToolId: ToolId;
   dprScale: number;
   isActiveViewport: boolean;
@@ -34,6 +45,7 @@ export type ViewportCanvasProps = {
   onFocusNode: (nodeId: string) => void;
   onPlaceAsset: (position: { x: number; y: number; z: number }) => void;
   onPlaceBrush: (brush: Brush, transform: Transform) => void;
+  onPlacePrimitiveNode: (data: PrimitiveNodeData, transform: Transform, name: string) => void;
   onPreviewBrushData: (nodeId: string, brush: Brush) => void;
   onPreviewMeshData: (nodeId: string, mesh: EditableMesh) => void;
   onPreviewNodeTransform: (nodeId: string, transform: Transform) => void;
@@ -44,8 +56,12 @@ export type ViewportCanvasProps = {
   onUpdateMeshData: (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => void;
   onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
   onViewportChange: (viewportId: ViewportPaneId, viewport: ViewportState) => void;
+  physicsPlayback: "paused" | "running" | "stopped";
+  physicsRevision: number;
   renderScene: DerivedRenderScene;
   renderMode: ViewportRenderMode;
+  sceneSettings: SceneSettings;
+  selectedEntity?: Entity;
   selectedNode?: GeometryNode;
   selectedNodeIds: string[];
   selectedNodes: GeometryNode[];
@@ -67,11 +83,25 @@ export type BrushCreateBasis = {
   v: Vec3;
 };
 
+export type BrushCreatePlacement =
+  | {
+      brush: Brush;
+      kind: "brush";
+      transform: Transform;
+    }
+  | {
+      kind: "primitive";
+      name: string;
+      primitive: PrimitiveNodeData;
+      transform: Transform;
+    };
+
 export type BrushCreateState =
   | {
       anchor: Vec3;
       basis: BrushCreateBasis;
       currentPoint: Vec3;
+      shape: PrimitiveShape;
       stage: "base";
     }
   | {
@@ -80,6 +110,7 @@ export type BrushCreateState =
       depth: number;
       dragPlane: Plane;
       height: number;
+      shape: PrimitiveShape;
       stage: "height";
       startPoint: Vec3;
       width: number;

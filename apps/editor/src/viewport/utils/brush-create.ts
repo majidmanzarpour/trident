@@ -11,7 +11,8 @@ import {
   type Transform,
   type Vec3
 } from "@web-hammer/shared";
-import type { BrushCreateBasis, BrushCreateState } from "@/viewport/types";
+import { createPrimitiveNodeData, createPrimitiveNodeLabel } from "@/lib/authoring";
+import type { BrushCreateBasis, BrushCreatePlacement, BrushCreateState } from "@/viewport/types";
 import {
   Camera,
   Euler,
@@ -160,13 +161,30 @@ export function createBrushCreateDragPlane(camera: Camera, normal: Vec3, coplana
 
 export function buildBrushCreatePlacement(
   state: Extract<BrushCreateState, { stage: "height" }>
-): { brush: Brush; transform: Transform } | undefined {
+): BrushCreatePlacement | undefined {
   if (Math.abs(state.width) <= 0.0001 || Math.abs(state.depth) <= 0.0001 || Math.abs(state.height) <= 0.0001) {
     return undefined;
   }
 
   const center = computeBrushCreateCenter(state.anchor, state.basis, state.width, state.depth, state.height);
   const rotation = basisToEuler(state.basis);
+  const uniformSphereSize = Math.max(Math.abs(state.width), Math.abs(state.height), Math.abs(state.depth));
+  const size =
+    state.shape === "sphere"
+      ? vec3(uniformSphereSize, uniformSphereSize, uniformSphereSize)
+      : vec3(Math.abs(state.width), Math.abs(state.height), Math.abs(state.depth));
+
+  if (state.shape !== "cube") {
+    return {
+      kind: "primitive",
+      name: createPrimitiveNodeLabel("brush", state.shape),
+      primitive: createPrimitiveNodeData("brush", state.shape, size),
+      transform: {
+        ...makeTransform(center),
+        rotation
+      }
+    };
+  }
 
   return {
     brush: createAxisAlignedBrushFromBounds({
@@ -174,6 +192,7 @@ export function buildBrushCreatePlacement(
       y: { min: -Math.abs(state.height) * 0.5, max: Math.abs(state.height) * 0.5 },
       z: { min: -Math.abs(state.depth) * 0.5, max: Math.abs(state.depth) * 0.5 }
     }),
+    kind: "brush",
     transform: {
       ...makeTransform(center),
       rotation

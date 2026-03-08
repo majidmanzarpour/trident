@@ -9,9 +9,10 @@ import type {
   LayerID,
   Material,
   MaterialID,
-  NodeID
+  NodeID,
+  SceneSettings
 } from "@web-hammer/shared";
-import { makeTransform, vec3 } from "@web-hammer/shared";
+import { createDefaultSceneSettings, makeTransform, vec3 } from "@web-hammer/shared";
 
 export type SceneDocument = {
   nodes: Map<NodeID, GeometryNode>;
@@ -19,6 +20,7 @@ export type SceneDocument = {
   materials: Map<MaterialID, Material>;
   assets: Map<AssetID, Asset>;
   layers: Map<LayerID, Layer>;
+  settings: SceneSettings;
   revision: number;
   getNode: (id: NodeID) => GeometryNode | undefined;
   getEntity: (id: EntityID) => Entity | undefined;
@@ -30,6 +32,7 @@ export type SceneDocument = {
   setMaterial: (material: Material) => void;
   setAsset: (asset: Asset) => void;
   setLayer: (layer: Layer) => void;
+  setSettings: (settings: SceneSettings) => void;
   touch: () => number;
 };
 
@@ -39,6 +42,7 @@ export type SceneDocumentSnapshot = {
   layers: Layer[];
   materials: Material[];
   nodes: GeometryNode[];
+  settings: SceneSettings;
 };
 
 export function createSceneDocument(): SceneDocument {
@@ -47,6 +51,7 @@ export function createSceneDocument(): SceneDocument {
   const materials = new Map<MaterialID, Material>();
   const assets = new Map<AssetID, Asset>();
   const layers = new Map<LayerID, Layer>();
+  let settings = createDefaultSceneSettings();
 
   const document: SceneDocument = {
     nodes,
@@ -54,6 +59,12 @@ export function createSceneDocument(): SceneDocument {
     materials,
     assets,
     layers,
+    get settings() {
+      return settings;
+    },
+    set settings(nextSettings: SceneSettings) {
+      settings = nextSettings;
+    },
     revision: 0,
     getNode(id) {
       return nodes.get(id);
@@ -117,6 +128,10 @@ export function createSceneDocument(): SceneDocument {
       layers.set(layer.id, layer);
       document.touch();
     },
+    setSettings(nextSettings) {
+      settings = structuredClone(nextSettings);
+      document.touch();
+    },
     touch() {
       document.revision += 1;
       return document.revision;
@@ -132,7 +147,8 @@ export function createSceneDocumentSnapshot(scene: SceneDocument): SceneDocument
     entities: Array.from(scene.entities.values(), (entity) => structuredClone(entity)),
     layers: Array.from(scene.layers.values(), (layer) => structuredClone(layer)),
     materials: Array.from(scene.materials.values(), (material) => structuredClone(material)),
-    nodes: Array.from(scene.nodes.values(), (node) => structuredClone(node))
+    nodes: Array.from(scene.nodes.values(), (node) => structuredClone(node)),
+    settings: structuredClone(scene.settings)
   };
 }
 
@@ -158,6 +174,7 @@ export function loadSceneDocumentSnapshot(scene: SceneDocument, snapshot: SceneD
   snapshot.layers.forEach((layer) => {
     scene.layers.set(layer.id, structuredClone(layer));
   });
+  scene.settings = structuredClone(snapshot.settings ?? createDefaultSceneSettings());
 
   scene.touch();
 }
@@ -192,6 +209,7 @@ export function createSeedSceneDocument(): SceneDocument {
     visible: true,
     locked: false
   });
+  document.settings = createDefaultSceneSettings();
 
   document.materials.set("material:blockout:orange", {
     id: "material:blockout:orange",

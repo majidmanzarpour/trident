@@ -1,4 +1,12 @@
-import type { BrushNode, Entity, ModelNode, Transform, Vec3 } from "@web-hammer/shared";
+import type {
+  BrushNode,
+  Entity,
+  LightNode,
+  ModelNode,
+  PrimitiveNode,
+  Transform,
+  Vec3
+} from "@web-hammer/shared";
 import { vec3 } from "@web-hammer/shared";
 import type { Command } from "../command-stack";
 import type { SceneDocument } from "../../document/scene-document";
@@ -48,5 +56,67 @@ export function createPlaceEntityCommand(entity: Entity): Command {
     undo(scene) {
       scene.removeEntity(entity.id);
     }
+  };
+}
+
+export function createPlacePrimitiveNodeCommand(
+  scene: SceneDocument,
+  transform: Transform,
+  primitive: Pick<PrimitiveNode, "data" | "name">
+): {
+  command: Command;
+  nodeId: string;
+} {
+  const nodeId = createDuplicateNodeId(scene, `node:${primitive.data.role}:${primitive.data.shape}`);
+  const node: PrimitiveNode = {
+    id: nodeId,
+    kind: "primitive",
+    name: primitive.name,
+    transform: structuredClone(transform),
+    data: structuredClone(primitive.data)
+  };
+
+  return {
+    command: {
+      label: `place ${primitive.data.role}`,
+      execute(nextScene) {
+        nextScene.addNode(structuredClone(node));
+      },
+      undo(nextScene) {
+        nextScene.removeNode(node.id);
+      }
+    },
+    nodeId
+  };
+}
+
+export function createPlaceLightNodeCommand(
+  scene: SceneDocument,
+  transform: Transform,
+  light: Pick<LightNode, "data" | "name">
+): {
+  command: Command;
+  nodeId: string;
+} {
+  const nodeId = createDuplicateNodeId(scene, `node:light:${light.data.type}`);
+  const node: LightNode = {
+    id: nodeId,
+    kind: "light",
+    name: light.name,
+    transform: structuredClone(transform),
+    data: structuredClone(light.data)
+  };
+
+  return {
+    command: {
+      label: "place light",
+      execute(nextScene) {
+        nextScene.addNode(structuredClone(node));
+      },
+      undo(nextScene) {
+        nextScene.removeNode(node.id);
+      }
+    },
+    nodeId
   };
 }

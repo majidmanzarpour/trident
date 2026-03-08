@@ -3,10 +3,11 @@ import type { ViewportState } from "@web-hammer/render-pipeline";
 import { createEditorViewports, type ViewModeId, type ViewportPaneId } from "@/viewport/viewports";
 
 export type ViewportQuality = 0.5 | 0.75 | 1 | 1.5;
+export type RightPanelId = "inspector" | "materials" | "player" | "scene" | "world";
 
 type UiStore = {
   activeViewportId: ViewportPaneId;
-  rightPanel: "inspector" | "materials" | "scene";
+  rightPanel: RightPanelId;
   selectedAssetId: string;
   selectedMaterialId: string;
   viewMode: ViewModeId;

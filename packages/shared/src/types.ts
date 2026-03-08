@@ -6,6 +6,13 @@ export type LayerID = string;
 export type FaceID = string;
 export type VertexID = string;
 export type HalfEdgeID = string;
+export type PrimitiveShape = "cone" | "cube" | "cylinder" | "sphere";
+export type PrimitiveRole = "brush" | "prop";
+export type PropBodyType = "dynamic" | "fixed" | "kinematicPosition";
+export type PropColliderShape = "ball" | "cone" | "cuboid" | "cylinder" | "trimesh";
+export type LightType = "ambient" | "directional" | "hemisphere" | "point" | "spot";
+export type EntityType = "npc-spawn" | "player-spawn" | "smart-object";
+export type PlayerCameraMode = "fps" | "third-person" | "top-down";
 
 export type Vec3 = {
   x: number;
@@ -75,6 +82,49 @@ export type ModelReference = {
   path: string;
 };
 
+export type PropPhysics = {
+  angularDamping: number;
+  bodyType: PropBodyType;
+  canSleep: boolean;
+  ccd: boolean;
+  colliderShape: PropColliderShape;
+  contactSkin: number;
+  density?: number;
+  enabled: boolean;
+  friction: number;
+  gravityScale: number;
+  linearDamping: number;
+  lockRotations: boolean;
+  lockTranslations: boolean;
+  mass?: number;
+  restitution: number;
+  sensor: boolean;
+};
+
+export type PrimitiveNodeData = {
+  materialId?: MaterialID;
+  physics?: PropPhysics;
+  radialSegments?: number;
+  role: PrimitiveRole;
+  shape: PrimitiveShape;
+  size: Vec3;
+  uvScale?: Vec2;
+};
+
+export type LightNodeData = {
+  angle?: number;
+  castShadow: boolean;
+  color: string;
+  decay?: number;
+  distance?: number;
+  enabled: boolean;
+  groundColor?: string;
+  intensity: number;
+  penumbra?: number;
+  target?: Vec3;
+  type: LightType;
+};
+
 export type GeometryNodeBase = {
   id: NodeID;
   name: string;
@@ -96,7 +146,17 @@ export type ModelNode = GeometryNodeBase & {
   data: ModelReference;
 };
 
-export type GeometryNode = BrushNode | MeshNode | ModelNode;
+export type PrimitiveNode = GeometryNodeBase & {
+  kind: "primitive";
+  data: PrimitiveNodeData;
+};
+
+export type LightNode = GeometryNodeBase & {
+  kind: "light";
+  data: LightNodeData;
+};
+
+export type GeometryNode = BrushNode | MeshNode | ModelNode | PrimitiveNode | LightNode;
 
 export type Asset = {
   id: AssetID;
@@ -132,7 +192,32 @@ export type Layer = {
 
 export type Entity = {
   id: EntityID;
-  type: string;
+  name: string;
+  type: EntityType;
   transform: Transform;
   properties: Record<string, string | number | boolean>;
+};
+
+export type PlayerSettings = {
+  cameraMode: PlayerCameraMode;
+  canCrouch: boolean;
+  canJump: boolean;
+  canRun: boolean;
+  crouchHeight: number;
+  height: number;
+  jumpHeight: number;
+  movementSpeed: number;
+  runningSpeed: number;
+};
+
+export type WorldSettings = {
+  ambientColor: string;
+  ambientIntensity: number;
+  gravity: Vec3;
+  physicsEnabled: boolean;
+};
+
+export type SceneSettings = {
+  player: PlayerSettings;
+  world: WorldSettings;
 };

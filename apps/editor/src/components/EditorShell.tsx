@@ -1,6 +1,18 @@
 import type { EditorCore, TransformAxis } from "@web-hammer/editor-core";
 import type { GridSnapValue, DerivedRenderScene, ViewportState } from "@web-hammer/render-pipeline";
-import type { Brush, EditableMesh, Material, Transform, Vec2 } from "@web-hammer/shared";
+import type {
+  Brush,
+  EditableMesh,
+  EntityType,
+  LightNodeData,
+  LightType,
+  Material,
+  PrimitiveNodeData,
+  PrimitiveShape,
+  SceneSettings,
+  Transform,
+  Vec2
+} from "@web-hammer/shared";
 import type { ToolId } from "@web-hammer/tool-system";
 import type { WorkerJob } from "@web-hammer/workers";
 import type { ReactNode } from "react";
@@ -12,7 +24,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { ViewportCanvas } from "@/viewport/ViewportCanvas";
 import type { MeshEditMode } from "@/viewport/editing";
 import type { MeshEditToolbarActionRequest } from "@/viewport/types";
-import type { ViewportQuality } from "@/state/ui-store";
+import type { RightPanelId, ViewportQuality } from "@/state/ui-store";
 import {
   getViewModePreset,
   viewportPaneDefinitions,
@@ -22,7 +34,8 @@ import {
 import { cn } from "@/lib/utils";
 
 type EditorShellProps = {
-  activeRightPanel: "inspector" | "materials" | "scene";
+  activeBrushShape: PrimitiveShape;
+  activeRightPanel: RightPanelId;
   activeToolId: ToolId;
   activeViewportId: ViewportPaneId;
   canRedo: boolean;
@@ -33,6 +46,7 @@ type EditorShellProps = {
   meshEditMode: MeshEditMode;
   meshEditToolbarAction?: MeshEditToolbarActionRequest;
   onActivateViewport: (viewportId: ViewportPaneId) => void;
+  onActivateBrushTool: () => void;
   onApplyMaterial: (materialId: string, scope: "faces" | "object", faceIds: string[]) => void;
   onClipSelection: (axis: TransformAxis) => void;
   onCommitMeshTopology: (nodeId: string, mesh: EditableMesh) => void;
@@ -47,12 +61,18 @@ type EditorShellProps = {
   onDeleteMaterial: (materialId: string) => void;
   onLoadWhmap: () => void;
   onInvertSelectionNormals: () => void;
+  onPausePhysics: () => void;
   onMeshEditToolbarAction: (action: MeshEditToolbarActionRequest["kind"]) => void;
-  onPlaceEntity: (type: "spawn" | "light") => void;
+  onPlaceEntity: (type: EntityType) => void;
+  onPlaceLight: (type: LightType) => void;
   onMeshInflate: (factor: number) => void;
   onMirrorSelection: (axis: TransformAxis) => void;
   onPlaceAsset: (position: { x: number; y: number; z: number }) => void;
   onPlaceBrush: (brush: Brush, transform: Transform) => void;
+  onPlaceBrushPrimitive: (shape: PrimitiveShape) => void;
+  onPlacePrimitiveNode: (data: PrimitiveNodeData, transform: Transform, name: string) => void;
+  onPlaceProp: (shape: PrimitiveShape) => void;
+  onPlayPhysics: () => void;
   onPreviewBrushData: (nodeId: string, brush: Brush) => void;
   onPreviewMeshData: (nodeId: string, mesh: EditableMesh) => void;
   onRedo: () => void;
@@ -62,10 +82,12 @@ type EditorShellProps = {
   onSelectMaterial: (materialId: string) => void;
   onSetUvScale: (scope: "faces" | "object", faceIds: string[], uvScale: Vec2) => void;
   onSelectNodes: (nodeIds: string[]) => void;
+  onSetActiveBrushShape: (shape: PrimitiveShape) => void;
   onSetMeshEditMode: (mode: MeshEditMode) => void;
-  onSetRightPanel: (panel: "inspector" | "materials" | "scene") => void;
+  onSetRightPanel: (panel: RightPanelId) => void;
   onSetSnapEnabled: (enabled: boolean) => void;
   onSetSnapSize: (snapSize: GridSnapValue) => void;
+  onStopPhysics: () => void;
   onSetTransformMode: (mode: "rotate" | "scale" | "translate") => void;
   onSetToolId: (toolId: ToolId) => void;
   onToggleViewportQuality: () => void;
@@ -74,12 +96,19 @@ type EditorShellProps = {
   onPreviewNodeTransform: (nodeId: string, transform: Transform) => void;
   onTranslateSelection: (axis: TransformAxis, direction: -1 | 1) => void;
   onUndo: () => void;
+  onUpdateEntityProperties: (entityId: string, properties: Record<string, string | number | boolean>) => void;
+  onUpdateEntityTransform: (entityId: string, transform: Transform, beforeTransform?: Transform) => void;
+  onUpdateNodeData: (nodeId: string, data: PrimitiveNodeData | LightNodeData) => void;
+  onUpdateSceneSettings: (settings: SceneSettings, beforeSettings?: SceneSettings) => void;
   onUpdateViewport: (viewportId: ViewportPaneId, viewport: ViewportState) => void;
   onUpsertMaterial: (material: Material) => void;
   onUpdateBrushData: (nodeId: string, brush: Brush, beforeBrush?: Brush) => void;
   onUpdateMeshData: (nodeId: string, mesh: EditableMesh, beforeMesh?: EditableMesh) => void;
   onUpdateNodeTransform: (nodeId: string, transform: Transform, beforeTransform?: Transform) => void;
+  physicsPlayback: "paused" | "running" | "stopped";
+  physicsRevision: number;
   renderScene: DerivedRenderScene;
+  sceneSettings: SceneSettings;
   selectedAssetId: string;
   selectedFaceIds: string[];
   selectedMaterialId: string;
@@ -91,6 +120,7 @@ type EditorShellProps = {
 };
 
 export function EditorShell({
+  activeBrushShape,
   activeRightPanel,
   activeToolId,
   activeViewportId,
@@ -102,6 +132,7 @@ export function EditorShell({
   meshEditMode,
   meshEditToolbarAction,
   onActivateViewport,
+  onActivateBrushTool,
   onApplyMaterial,
   onClipSelection,
   onCommitMeshTopology,
@@ -116,12 +147,18 @@ export function EditorShell({
   onDeleteMaterial,
   onLoadWhmap,
   onInvertSelectionNormals,
+  onPausePhysics,
   onMeshEditToolbarAction,
   onPlaceEntity,
+  onPlaceLight,
   onMeshInflate,
   onMirrorSelection,
   onPlaceAsset,
   onPlaceBrush,
+  onPlaceBrushPrimitive,
+  onPlacePrimitiveNode,
+  onPlaceProp,
+  onPlayPhysics,
   onPreviewBrushData,
   onPreviewMeshData,
   onRedo,
@@ -131,10 +168,12 @@ export function EditorShell({
   onSelectMaterial,
   onSetUvScale,
   onSelectNodes,
+  onSetActiveBrushShape,
   onSetMeshEditMode,
   onSetRightPanel,
   onSetSnapEnabled,
   onSetSnapSize,
+  onStopPhysics,
   onSetTransformMode,
   onSetToolId,
   onToggleViewportQuality,
@@ -143,12 +182,19 @@ export function EditorShell({
   onPreviewNodeTransform,
   onTranslateSelection,
   onUndo,
+  onUpdateEntityProperties,
+  onUpdateEntityTransform,
+  onUpdateNodeData,
+  onUpdateSceneSettings,
   onUpdateViewport,
   onUpsertMaterial,
   onUpdateBrushData,
   onUpdateMeshData,
   onUpdateNodeTransform,
+  physicsPlayback,
+  physicsRevision,
   renderScene,
+  sceneSettings,
   selectedAssetId,
   selectedFaceIds,
   selectedMaterialId,
@@ -159,15 +205,19 @@ export function EditorShell({
   viewports
 }: EditorShellProps) {
   const nodes = Array.from(editor.scene.nodes.values());
+  const entities = Array.from(editor.scene.entities.values());
   const materials = Array.from(editor.scene.materials.values());
   const assets = Array.from(editor.scene.assets.values());
-  const selectedNodeId = editor.selection.ids[0];
+  const selectedObjectId = editor.selection.ids[0];
+  const selectedNodeId = selectedObjectId && editor.scene.getNode(selectedObjectId) ? selectedObjectId : undefined;
   const selectedNode = selectedNodeId ? editor.scene.getNode(selectedNodeId) : undefined;
+  const selectedEntity = !selectedNodeId && selectedObjectId ? editor.scene.getEntity(selectedObjectId) : undefined;
   const selectedNodes = editor.selection.ids
     .map((nodeId) => editor.scene.getNode(nodeId))
     .filter((node): node is NonNullable<typeof node> => Boolean(node));
   const activeToolLabel = tools.find((tool) => tool.id === activeToolId)?.label ?? activeToolId;
-  const selectedIsGeometry = selectedNode?.kind === "brush" || selectedNode?.kind === "mesh";
+  const selectedIsGeometry =
+    selectedNode?.kind === "brush" || selectedNode?.kind === "mesh" || selectedNode?.kind === "primitive";
   const selectedIsMesh = selectedNode?.kind === "mesh";
   const activeViewport = viewports[activeViewportId];
 
@@ -180,6 +230,7 @@ export function EditorShell({
         label={definition.shortLabel}
       >
         <ViewportCanvas
+          activeBrushShape={activeBrushShape}
           activeToolId={activeToolId}
           dprScale={resolveViewportDprScale(viewportQuality)}
           isActiveViewport={activeViewportId === viewportId}
@@ -191,6 +242,7 @@ export function EditorShell({
           onFocusNode={onFocusNode}
           onPlaceAsset={onPlaceAsset}
           onPlaceBrush={onPlaceBrush}
+          onPlacePrimitiveNode={onPlacePrimitiveNode}
           onPreviewBrushData={onPreviewBrushData}
           onPreviewMeshData={onPreviewMeshData}
           onPreviewNodeTransform={onPreviewNodeTransform}
@@ -201,8 +253,12 @@ export function EditorShell({
           onUpdateMeshData={onUpdateMeshData}
           onUpdateNodeTransform={onUpdateNodeTransform}
           onViewportChange={onUpdateViewport}
+          physicsPlayback={physicsPlayback}
+          physicsRevision={physicsRevision}
           renderMode={definition.renderMode}
           renderScene={renderScene}
+          sceneSettings={sceneSettings}
+          selectedEntity={selectedEntity}
           selectedNode={selectedNode}
           selectedNodeIds={editor.selection.ids}
           selectedNodes={selectedNodes}
@@ -228,8 +284,8 @@ export function EditorShell({
           onExportEngine={onExportEngine}
           onExportGltf={onExportGltf}
           onFocusSelection={() => {
-            if (selectedNodeId) {
-              onFocusNode(selectedNodeId);
+            if (selectedObjectId) {
+              onFocusNode(selectedObjectId);
             }
           }}
           onLoadWhmap={onLoadWhmap}
@@ -253,15 +309,19 @@ export function EditorShell({
           meshEditMode={meshEditMode}
           onInvertSelectionNormals={onInvertSelectionNormals}
           onLowerTop={() => onExtrudeSelection("y", -1)}
+          onPausePhysics={onPausePhysics}
           onMeshEditToolbarAction={onMeshEditToolbarAction}
           onMeshInflate={onMeshInflate}
+          onPlayPhysics={onPlayPhysics}
           onRaiseTop={() => onExtrudeSelection("y", 1)}
           onSetMeshEditMode={onSetMeshEditMode}
           onSetSnapEnabled={onSetSnapEnabled}
           onSetSnapSize={onSetSnapSize}
+          onStopPhysics={onStopPhysics}
           onSetTransformMode={onSetTransformMode}
           onSetToolId={onSetToolId}
           onSetViewMode={onSetViewMode}
+          physicsPlayback={physicsPlayback}
           selectedGeometry={selectedIsGeometry}
           selectedMesh={selectedIsMesh}
           snapEnabled={activeViewport.grid.enabled}
@@ -273,11 +333,15 @@ export function EditorShell({
         <InspectorSidebar
           activeRightPanel={activeRightPanel}
           activeToolId={activeToolId}
+          activeBrushShape={activeBrushShape}
           assets={assets}
+          entities={entities}
           materials={materials}
           meshEditMode={meshEditMode}
           nodes={nodes}
+          onActivateBrushTool={onActivateBrushTool}
           onApplyMaterial={onApplyMaterial}
+          onChangeBrushShape={onSetActiveBrushShape}
           onChangeRightPanel={onSetRightPanel}
           onClipSelection={onClipSelection}
           onDeleteMaterial={onDeleteMaterial}
@@ -287,18 +351,27 @@ export function EditorShell({
           onMirrorSelection={onMirrorSelection}
           onPlaceAsset={onPlaceAsset}
           onPlaceEntity={onPlaceEntity}
+          onPlaceLight={onPlaceLight}
+          onPlaceBrushPrimitive={onPlaceBrushPrimitive}
+          onPlaceProp={onPlaceProp}
           onSelectAsset={onSelectAsset}
           onSelectMaterial={onSelectMaterial}
           onSelectNodes={onSelectNodes}
           onSetUvScale={onSetUvScale}
           onTranslateSelection={onTranslateSelection}
           onUpsertMaterial={onUpsertMaterial}
+          onUpdateEntityProperties={onUpdateEntityProperties}
+          onUpdateEntityTransform={onUpdateEntityTransform}
+          onUpdateNodeData={onUpdateNodeData}
+          onUpdateSceneSettings={onUpdateSceneSettings}
           onUpdateNodeTransform={onUpdateNodeTransform}
+          sceneSettings={sceneSettings}
+          selectedEntity={selectedEntity}
           selectedAssetId={selectedAssetId}
           selectedFaceIds={selectedFaceIds}
           selectedMaterialId={selectedMaterialId}
           selectedNode={selectedNode}
-          selectedNodeId={selectedNodeId}
+          selectedNodeId={selectedObjectId}
           viewportTarget={activeViewport.camera.target}
         />
 

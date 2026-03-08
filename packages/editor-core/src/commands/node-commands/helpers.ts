@@ -8,11 +8,19 @@ export function applyPositionDelta(scene: SceneDocument, nodeIds: string[], delt
   nodeIds.forEach((nodeId) => {
     const node = scene.getNode(nodeId);
 
-    if (!node) {
+    if (node) {
+      node.transform.position = addVec3(node.transform.position, delta);
+      scene.touch();
       return;
     }
 
-    node.transform.position = addVec3(node.transform.position, delta);
+    const entity = scene.getEntity(nodeId);
+
+    if (!entity) {
+      return;
+    }
+
+    entity.transform.position = addVec3(entity.transform.position, delta);
     scene.touch();
   });
 }

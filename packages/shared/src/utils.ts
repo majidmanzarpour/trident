@@ -1,4 +1,15 @@
-import type { BrushNode, GeometryNode, MeshNode, ModelNode, Transform, Vec2, Vec3 } from "./types";
+import type {
+  BrushNode,
+  GeometryNode,
+  LightNode,
+  MeshNode,
+  ModelNode,
+  PrimitiveNode,
+  SceneSettings,
+  Transform,
+  Vec2,
+  Vec3
+} from "./types";
 
 export function vec2(x: number, y: number): Vec2 {
   return { x, y };
@@ -143,6 +154,28 @@ export function resolveTransformPivot(transform: Transform): Vec3 {
   return transform.pivot ?? vec3(0, 0, 0);
 }
 
+export function createDefaultSceneSettings(): SceneSettings {
+  return {
+    player: {
+      cameraMode: "fps",
+      canCrouch: true,
+      canJump: true,
+      canRun: true,
+      crouchHeight: 1.2,
+      height: 1.8,
+      jumpHeight: 1.2,
+      movementSpeed: 4.5,
+      runningSpeed: 7.5
+    },
+    world: {
+      ambientColor: "#9ec5f8",
+      ambientIntensity: 0.45,
+      gravity: vec3(0, -9.81, 0),
+      physicsEnabled: true
+    }
+  };
+}
+
 export function isBrushNode(node: GeometryNode): node is BrushNode {
   return node.kind === "brush";
 }
@@ -153,4 +186,12 @@ export function isMeshNode(node: GeometryNode): node is MeshNode {
 
 export function isModelNode(node: GeometryNode): node is ModelNode {
   return node.kind === "model";
+}
+
+export function isPrimitiveNode(node: GeometryNode): node is PrimitiveNode {
+  return node.kind === "primitive";
+}
+
+export function isLightNode(node: GeometryNode): node is LightNode {
+  return node.kind === "light";
 }

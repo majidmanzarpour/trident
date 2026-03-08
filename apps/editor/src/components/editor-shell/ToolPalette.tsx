@@ -1,6 +1,7 @@
 import type { GridSnapValue } from "@web-hammer/render-pipeline";
 import type { ToolId } from "@web-hammer/tool-system";
 import { MeshEditToolBars } from "@/components/editor-shell/MeshEditToolBars";
+import { PhysicsPlaybackControl } from "@/components/editor-shell/PhysicsPlaybackControl";
 import { PrimaryToolBar } from "@/components/editor-shell/PrimaryToolBar";
 import { SnapControl } from "@/components/editor-shell/SnapControl";
 import { ViewModeControl } from "@/components/editor-shell/ViewModeControl";
@@ -15,14 +16,18 @@ type ToolPaletteProps = {
   onMeshEditToolbarAction: (action: "arc" | "bevel" | "cut" | "delete" | "extrude" | "fill-face" | "invert-normals" | "merge" | "subdivide") => void;
   onInvertSelectionNormals: () => void;
   onLowerTop: () => void;
+  onPausePhysics: () => void;
   onMeshInflate: (factor: number) => void;
+  onPlayPhysics: () => void;
   onRaiseTop: () => void;
   onSetMeshEditMode: (mode: MeshEditMode) => void;
   onSetSnapEnabled: (enabled: boolean) => void;
   onSetSnapSize: (snapSize: GridSnapValue) => void;
+  onStopPhysics: () => void;
   onSetToolId: (toolId: ToolId) => void;
   onSetTransformMode: (mode: "rotate" | "scale" | "translate") => void;
   onSetViewMode: (viewMode: ViewModeId) => void;
+  physicsPlayback: "paused" | "running" | "stopped";
   selectedGeometry: boolean;
   selectedMesh: boolean;
   snapEnabled: boolean;
@@ -39,14 +44,18 @@ export function ToolPalette({
   onMeshEditToolbarAction,
   onInvertSelectionNormals,
   onLowerTop,
+  onPausePhysics,
   onMeshInflate,
+  onPlayPhysics,
   onRaiseTop,
   onSetMeshEditMode,
   onSetSnapEnabled,
   onSetSnapSize,
+  onStopPhysics,
   onSetToolId,
   onSetTransformMode,
   onSetViewMode,
+  physicsPlayback,
   selectedGeometry,
   selectedMesh,
   snapEnabled,
@@ -60,6 +69,7 @@ export function ToolPalette({
         <ViewModeControl currentViewMode={viewMode} onSetViewMode={onSetViewMode} />
         <PrimaryToolBar activeToolId={activeToolId} onSetToolId={onSetToolId} tools={tools} />
         <SnapControl currentSnapSize={currentSnapSize} gridSnapValues={gridSnapValues} onSetSnapEnabled={onSetSnapEnabled} onSetSnapSize={onSetSnapSize} snapEnabled={snapEnabled} />
+        <PhysicsPlaybackControl mode={physicsPlayback} onPause={onPausePhysics} onPlay={onPlayPhysics} onStop={onStopPhysics} />
       </div>
       {activeToolId === "mesh-edit" ? (
         <MeshEditToolBars

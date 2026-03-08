@@ -7,6 +7,7 @@ import {
   isBrushNode,
   isMeshNode,
   isModelNode,
+  isPrimitiveNode,
   normalizeVec3,
   subVec3,
   vec3,
@@ -15,6 +16,7 @@ import {
   type Vec2,
   type Vec3
 } from "@web-hammer/shared";
+import { BoxGeometry, ConeGeometry, CylinderGeometry, SphereGeometry } from "three";
 
 export type WorkerExportKind = "whmap-load" | "whmap-save" | "engine-export" | "gltf-export";
 
@@ -133,11 +135,12 @@ export async function serializeEngineScene(snapshot: SceneDocumentSnapshot): Pro
       metadata: {
         exportedAt: new Date().toISOString(),
         format: "web-hammer-engine",
-        version: 2
+        version: 3
       },
+      settings: snapshot.settings,
       nodes: await Promise.all(
         snapshot.nodes.map(async (node) => {
-          if (isBrushNode(node) || isMeshNode(node)) {
+          if (isBrushNode(node) || isMeshNode(node) || isPrimitiveNode(node)) {
             return {
               data: node.data,
               geometry: await buildExportGeometry(node, materialsById),
@@ -183,7 +186,7 @@ export async function serializeGltfScene(snapshot: SceneDocumentSnapshot): Promi
   }> = [];
 
   for (const node of snapshot.nodes) {
-    if (isBrushNode(node) || isMeshNode(node)) {
+    if (isBrushNode(node) || isMeshNode(node) || isPrimitiveNode(node)) {
       const geometry = await buildExportGeometry(node, materialsById);
 
       if (geometry.primitives.length === 0) {
@@ -409,15 +412,15 @@ async function buildGltfDocument(
 }
 
 async function buildExportGeometry(
-  node: Extract<SceneDocumentSnapshot["nodes"][number], { kind: "brush" | "mesh" }>,
+  node: Extract<SceneDocumentSnapshot["nodes"][number], { kind: "brush" | "mesh" | "primitive" }>,
   materialsById: Map<MaterialID, Material>
 ) {
   const fallbackMaterial = await resolveExportMaterial({
-    color: node.kind === "brush" ? "#f69036" : "#6ed5c0",
+    color: node.kind === "brush" ? "#f69036" : node.kind === "primitive" && node.data.role === "prop" ? "#7f8ea3" : "#6ed5c0",
     id: `material:fallback:${node.id}`,
-    metalness: node.kind === "brush" ? 0 : 0.05,
+    metalness: node.kind === "brush" ? 0 : node.kind === "primitive" && node.data.role === "prop" ? 0.12 : 0.05,
     name: `${node.name} Default`,
-    roughness: node.kind === "brush" ? 0.95 : 0.82
+    roughness: node.kind === "brush" ? 0.95 : node.kind === "primitive" && node.data.role === "prop" ? 0.64 : 0.82
   });
   const primitiveByMaterial = new Map<string, {
     indices: number[];
@@ -492,9 +495,49 @@ async function buildExportGeometry(
     }
   }
 
+  if (isPrimitiveNode(node)) {
+    const material = node.data.materialId ? await resolveExportMaterial(materialsById.get(node.data.materialId)) : fallbackMaterial;
+    const primitive = buildPrimitiveGeometry(node.data.shape, node.data.size, node.data.radialSegments ?? 24);
+
+    if (primitive) {
+      primitiveByMaterial.set(material.id, {
+        indices: primitive.indices,
+        material,
+        normals: primitive.normals,
+        positions: primitive.positions,
+        uvs: primitive.uvs
+      });
+    }
+  }
+
   return {
     primitives: Array.from(primitiveByMaterial.values())
   };
+}
+
+function buildPrimitiveGeometry(shape: "cone" | "cube" | "cylinder" | "sphere", size: Vec3, radialSegments: number) {
+  const geometry =
+    shape === "cube"
+      ? new BoxGeometry(Math.abs(size.x), Math.abs(size.y), Math.abs(size.z))
+      : shape === "sphere"
+        ? new SphereGeometry(Math.max(Math.abs(size.x), Math.abs(size.z)) * 0.5, radialSegments, Math.max(8, Math.floor(radialSegments * 0.75)))
+        : shape === "cylinder"
+          ? new CylinderGeometry(Math.max(Math.abs(size.x), Math.abs(size.z)) * 0.5, Math.max(Math.abs(size.x), Math.abs(size.z)) * 0.5, Math.abs(size.y), radialSegments)
+          : new ConeGeometry(Math.max(Math.abs(size.x), Math.abs(size.z)) * 0.5, Math.abs(size.y), radialSegments);
+  const positionAttribute = geometry.getAttribute("position");
+  const normalAttribute = geometry.getAttribute("normal");
+  const uvAttribute = geometry.getAttribute("uv");
+  const index = geometry.getIndex();
+
+  const primitive = {
+    indices: index ? Array.from(index.array as ArrayLike<number>) : Array.from({ length: positionAttribute.count }, (_, value) => value),
+    normals: Array.from(normalAttribute.array as ArrayLike<number>),
+    positions: Array.from(positionAttribute.array as ArrayLike<number>),
+    uvs: uvAttribute ? Array.from(uvAttribute.array as ArrayLike<number>) : []
+  };
+
+  geometry.dispose();
+  return primitive;
 }
 
 async function resolveExportMaterial(material?: Material) {

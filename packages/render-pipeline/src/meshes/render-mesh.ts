@@ -1,6 +1,16 @@
 import { getFaceVertices, reconstructBrushFaces, triangulateMeshFace } from "@web-hammer/geometry-kernel";
-import type { Asset, AssetID, GeometryNode, Material, MaterialID, NodeID, Vec2, Vec3 } from "@web-hammer/shared";
-import { crossVec3, dotVec3, isBrushNode, isMeshNode, isModelNode, normalizeVec3, subVec3, vec3 } from "@web-hammer/shared";
+import type { Asset, AssetID, GeometryNode, Material, MaterialID, NodeID, PrimitiveRole, PropPhysics, Vec2, Vec3 } from "@web-hammer/shared";
+import {
+  crossVec3,
+  dotVec3,
+  isBrushNode,
+  isMeshNode,
+  isModelNode,
+  isPrimitiveNode,
+  normalizeVec3,
+  subVec3,
+  vec3
+} from "@web-hammer/shared";
 
 export type RenderPrimitive =
   | {
@@ -8,16 +18,28 @@ export type RenderPrimitive =
       size: Vec3;
     }
   | {
-      kind: "icosahedron";
+      kind: "cone";
+      height: number;
+      radialSegments: number;
       radius: number;
-      detail: number;
     }
   | {
       kind: "cylinder";
-      radiusTop: number;
-      radiusBottom: number;
       height: number;
       radialSegments: number;
+      radiusBottom: number;
+      radiusTop: number;
+    }
+  | {
+      kind: "sphere";
+      heightSegments: number;
+      radius: number;
+      widthSegments: number;
+    }
+  | {
+      kind: "icosahedron";
+      radius: number;
+      detail: number;
     };
 
 export type RenderMaterial = {
@@ -53,9 +75,11 @@ export type DerivedRenderMesh = {
   sourceKind: GeometryNode["kind"];
   dirty: boolean;
   bvhEnabled: boolean;
+  physics?: PropPhysics;
   label: string;
   position: Vec3;
   pivot?: Vec3;
+  primitiveRole?: PrimitiveRole;
   rotation: Vec3;
   scale: Vec3;
   primitive?: RenderPrimitive;
@@ -81,20 +105,14 @@ export function createDerivedRenderMesh(
     sourceKind: node.kind,
     dirty: false,
     bvhEnabled: true,
+    physics: isPrimitiveNode(node) ? node.data.physics : undefined,
     label: `${node.name} (${appearance.primitiveLabel})`,
     position: node.transform.position,
     pivot: node.transform.pivot,
+    primitiveRole: isPrimitiveNode(node) ? node.data.role : undefined,
     rotation: node.transform.rotation,
     scale: node.transform.scale,
-    primitive: isModelNode(node)
-      ? {
-            kind: "cylinder",
-            radiusTop: 0.65,
-            radiusBottom: 0.65,
-            height: 2.2,
-            radialSegments: 12
-          }
-      : undefined,
+    primitive: resolveNodePrimitive(node),
     surface: surfaceResult?.surface,
     material: surfaceResult?.materials[0] ?? {
       category: appearance.category,
@@ -188,6 +206,26 @@ function getRenderAppearance(
     };
   }
 
+  if (isPrimitiveNode(node)) {
+    const material = node.data.materialId ? materialsById.get(node.data.materialId) : undefined;
+
+    return {
+      category: material?.category,
+      color: material?.color ?? (node.data.role === "brush" ? "#f69036" : "#7f8ea3"),
+      colorTexture: material?.colorTexture,
+      edgeColor: material?.edgeColor,
+      edgeThickness: material?.edgeThickness,
+      flatShaded: true,
+      metalness: material?.metalness ?? (node.data.role === "brush" ? 0 : 0.12),
+      metalnessTexture: material?.metalnessTexture,
+      normalTexture: material?.normalTexture,
+      roughness: material?.roughness ?? (node.data.role === "brush" ? 0.95 : 0.64),
+      roughnessTexture: material?.roughnessTexture,
+      wireframe: false,
+      primitiveLabel: node.data.shape
+    };
+  }
+
   return {
     color: "#ffffff",
     flatShaded: false,
@@ -196,6 +234,58 @@ function getRenderAppearance(
     wireframe: false,
     primitiveLabel: "mesh"
   };
+}
+
+function resolveNodePrimitive(node: GeometryNode): RenderPrimitive | undefined {
+  if (isModelNode(node)) {
+    return {
+      kind: "cylinder",
+      radiusTop: 0.65,
+      radiusBottom: 0.65,
+      height: 2.2,
+      radialSegments: 12
+    };
+  }
+
+  if (!isPrimitiveNode(node)) {
+    return undefined;
+  }
+
+  const radius = Math.max(Math.abs(node.data.size.x), Math.abs(node.data.size.z)) * 0.5;
+  const height = Math.abs(node.data.size.y);
+  const radialSegments = Math.max(12, node.data.radialSegments ?? 24);
+
+  switch (node.data.shape) {
+    case "cube":
+      return {
+        kind: "box",
+        size: vec3(Math.abs(node.data.size.x), Math.abs(node.data.size.y), Math.abs(node.data.size.z))
+      };
+    case "sphere":
+      return {
+        kind: "sphere",
+        heightSegments: Math.max(8, Math.floor(radialSegments * 0.75)),
+        radius,
+        widthSegments: radialSegments
+      };
+    case "cylinder":
+      return {
+        kind: "cylinder",
+        height,
+        radialSegments,
+        radiusBottom: radius,
+        radiusTop: radius
+      };
+    case "cone":
+      return {
+        kind: "cone",
+        height,
+        radialSegments,
+        radius
+      };
+    default:
+      return undefined;
+  }
 }
 
 function createBrushSurface(

@@ -92,6 +92,7 @@ import type {
 } from "@/viewport/types";
 
 export function ViewportCanvas({
+  activeBrushShape,
   activeToolId,
   dprScale,
   isActiveViewport,
@@ -103,6 +104,7 @@ export function ViewportCanvas({
   onFocusNode,
   onPlaceAsset,
   onPlaceBrush,
+  onPlacePrimitiveNode,
   onPreviewBrushData,
   onPreviewMeshData,
   onPreviewNodeTransform,
@@ -113,8 +115,12 @@ export function ViewportCanvas({
   onUpdateMeshData,
   onUpdateNodeTransform,
   onViewportChange,
+  physicsPlayback,
+  physicsRevision,
   renderMode,
   renderScene,
+  sceneSettings,
+  selectedEntity,
   selectedNode,
   selectedNodeIds,
   selectedNodes,
@@ -139,6 +145,7 @@ export function ViewportCanvas({
   const [faceCutState, setFaceCutState] = useState<{ faceId: string } | null>(null);
   const [faceSubdivisionState, setFaceSubdivisionState] = useState<FaceSubdivisionState | null>(null);
   const snapSize = resolveViewportSnapSize(viewport);
+  const editorInteractionEnabled = physicsPlayback === "stopped";
   const [meshEditSelectionIds, setMeshEditSelectionIds] = useState<string[]>([]);
   const [transformDragging, setTransformDragging] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
@@ -171,6 +178,29 @@ export function ViewportCanvas({
       setBrushCreateState(null);
     }
   }, [activeToolId]);
+
+  useEffect(() => {
+    if (editorInteractionEnabled) {
+      return;
+    }
+
+    brushClickOriginRef.current = null;
+    marqueeOriginRef.current = null;
+    selectionClickOriginRef.current = null;
+    setMarquee(null);
+    setTransformDragging(false);
+  }, [editorInteractionEnabled]);
+
+  useEffect(() => {
+    setBrushCreateState((current) =>
+      current
+        ? {
+            ...current,
+            shape: activeBrushShape
+          }
+        : current
+    );
+  }, [activeBrushShape]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1642,6 +1672,7 @@ export function ViewportCanvas({
         anchor: anchorPoint,
         basis: createBrushCreateBasis(hit.normal),
         currentPoint: anchorPoint,
+        shape: activeBrushShape,
         stage: "base"
       });
       return;
@@ -1706,12 +1737,21 @@ export function ViewportCanvas({
       return;
     }
 
-    onPlaceBrush(placement.brush, placement.transform);
+    if (placement.kind === "brush") {
+      onPlaceBrush(placement.brush, placement.transform);
+    } else {
+      onPlacePrimitiveNode(placement.primitive, placement.transform, placement.name);
+    }
     setBrushCreateState(null);
   };
 
   const handlePointerDown: PointerEventHandler<HTMLDivElement> = (event) => {
     onActivateViewport(viewportId);
+
+    if (!editorInteractionEnabled) {
+      return;
+    }
+
     const bounds = event.currentTarget.getBoundingClientRect();
     pointerPositionRef.current = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
     selectionClickOriginRef.current =
@@ -1736,6 +1776,10 @@ export function ViewportCanvas({
   };
 
   const handlePointerMove: PointerEventHandler<HTMLDivElement> = (event) => {
+    if (!editorInteractionEnabled) {
+      return;
+    }
+
     const bounds = event.currentTarget.getBoundingClientRect();
     pointerPositionRef.current = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
 
@@ -1788,6 +1832,10 @@ export function ViewportCanvas({
   };
 
   const handlePointerUp: PointerEventHandler<HTMLDivElement> = (event) => {
+    if (!editorInteractionEnabled) {
+      return;
+    }
+
     const bounds = event.currentTarget.getBoundingClientRect();
     const point = new Vector2(event.clientX - bounds.left, event.clientY - bounds.top);
     pointerPositionRef.current = point;
@@ -1947,6 +1995,10 @@ export function ViewportCanvas({
           cameraRef.current = state.camera;
         }}
         onPointerMissed={() => {
+          if (!editorInteractionEnabled) {
+            return;
+          }
+
           if (
             activeToolId === "brush" ||
             extrudeState ||
@@ -1972,22 +2024,15 @@ export function ViewportCanvas({
       >
         <color attach="background" args={[renderMode === "lit" ? "#0b1118" : "#091018"]} />
         {renderMode === "lit" ? <fog attach="fog" args={["#0b1118", 45, 180]} /> : null}
-        {renderMode === "lit" ? <ambientLight intensity={0.45} /> : null}
-        {renderMode === "lit" ? <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} /> : null}
         {renderMode === "lit" ? (
-          <directionalLight
-            castShadow
-            intensity={1.4}
-            position={[18, 26, 12]}
-            shadow-bias={-0.0002}
-            shadow-mapSize-height={2048}
-            shadow-mapSize-width={2048}
-            shadow-normalBias={0.045}
-          />
+          <ambientLight color={sceneSettings.world.ambientColor} intensity={sceneSettings.world.ambientIntensity} />
         ) : null}
+        {renderMode === "lit" ? <hemisphereLight args={["#9ec5f8", "#0f1721", 0.7]} /> : null}
+        {renderMode === "lit" ? <DefaultViewportSun center={renderScene.boundsCenter} /> : null}
         <EditorCameraRig
           controlsEnabled={
             isActiveViewport &&
+            editorInteractionEnabled &&
             !marquee &&
             !transformDragging &&
             !brushCreateState &&
@@ -2000,8 +2045,10 @@ export function ViewportCanvas({
           viewportId={viewportId}
           viewport={viewport}
         />
-        <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} viewportPlane={viewportPlane} />
-        {renderMode === "lit" ? <axesHelper args={[3]} /> : null}
+        {editorInteractionEnabled ? (
+          <ConstructionGrid activeToolId={activeToolId} onPlaceAsset={onPlaceAsset} viewport={viewport} viewportPlane={viewportPlane} />
+        ) : null}
+        {renderMode === "lit" && editorInteractionEnabled ? <axesHelper args={[3]} /> : null}
         <ScenePreview
           hiddenNodeIds={
             selectedNode &&
@@ -2009,33 +2056,36 @@ export function ViewportCanvas({
               ? [selectedNode.id]
               : []
           }
-          interactive={activeToolId !== "brush" && viewport.projection === "perspective"}
+          interactive={activeToolId !== "brush" && viewport.projection === "perspective" && editorInteractionEnabled}
           onFocusNode={onFocusNode}
           onMeshObjectChange={handleMeshObjectChange}
           onSelectNode={onSelectNodes}
+          physicsPlayback={physicsPlayback}
+          physicsRevision={physicsRevision}
           renderMode={renderMode}
           renderScene={renderScene}
+          sceneSettings={sceneSettings}
           selectedNodeIds={selectedNodeIds}
         />
-        {isActiveViewport && arcState && selectedNode ? <EditableMeshPreviewOverlay mesh={arcState.previewMesh} node={selectedNode} /> : null}
-        {isActiveViewport && bevelState && selectedNode ? <EditableMeshPreviewOverlay mesh={bevelState.previewMesh} node={selectedNode} /> : null}
-        {isActiveViewport && (extrudeState?.kind === "mesh" || extrudeState?.kind === "brush-mesh") && selectedNode ? (
+        {editorInteractionEnabled && isActiveViewport && arcState && selectedNode ? <EditableMeshPreviewOverlay mesh={arcState.previewMesh} node={selectedNode} /> : null}
+        {editorInteractionEnabled && isActiveViewport && bevelState && selectedNode ? <EditableMeshPreviewOverlay mesh={bevelState.previewMesh} node={selectedNode} /> : null}
+        {editorInteractionEnabled && isActiveViewport && (extrudeState?.kind === "mesh" || extrudeState?.kind === "brush-mesh") && selectedNode ? (
           <EditableMeshPreviewOverlay mesh={extrudeState.previewMesh} node={selectedNode} />
         ) : null}
-        {isActiveViewport && extrudeState && selectedNode ? (
+        {editorInteractionEnabled && isActiveViewport && extrudeState && selectedNode ? (
           <ExtrudeAxisGuide node={selectedNode} state={extrudeState} viewport={viewport} />
         ) : null}
-        {isActiveViewport && activeToolId === "brush" && brushCreateState ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "brush" && brushCreateState ? (
           <BrushCreatePreview snapSize={snapSize} state={brushCreateState} />
         ) : null}
-        {isActiveViewport && activeToolId === "clip" && selectedBrushNode ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "clip" && selectedBrushNode ? (
           <BrushClipOverlay
             node={selectedBrushNode}
             onSplitBrushAtCoordinate={onSplitBrushAtCoordinate}
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "mesh-edit" && faceCutState && selectedNode && editableMeshSource ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "mesh-edit" && faceCutState && selectedNode && editableMeshSource ? (
           <MeshCutOverlay
             faceId={faceCutState.faceId}
             mesh={editableMeshSource}
@@ -2047,7 +2097,7 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "mesh-edit" && faceSubdivisionState && selectedNode ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "mesh-edit" && faceSubdivisionState && selectedNode ? (
           <MeshSubdivideOverlay
             faceId={faceSubdivisionState.faceId}
             mesh={faceSubdivisionState.baseMesh}
@@ -2059,7 +2109,7 @@ export function ViewportCanvas({
             previewMesh={faceSubdivisionState.previewMesh}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "extrude" && selectedBrushNode ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "extrude" && selectedBrushNode ? (
           <BrushExtrudeOverlay
             node={selectedBrushNode}
             onCommitMeshTopology={onCommitMeshTopology}
@@ -2069,7 +2119,7 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "extrude" && selectedMeshNode ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "extrude" && selectedMeshNode ? (
           <MeshExtrudeOverlay
             node={selectedMeshNode}
             onUpdateMeshData={onUpdateMeshData}
@@ -2077,7 +2127,7 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "mesh-edit" && selectedBrushNode && !arcState && !bevelState && !extrudeState && !faceCutState && !faceSubdivisionState ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "mesh-edit" && selectedBrushNode && !arcState && !bevelState && !extrudeState && !faceCutState && !faceSubdivisionState ? (
           <BrushEditOverlay
             handles={brushEditHandles}
             meshEditMode={meshEditMode}
@@ -2093,7 +2143,7 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport && activeToolId === "mesh-edit" && selectedMeshNode && !arcState && !bevelState && !extrudeState && !faceCutState && !faceSubdivisionState ? (
+        {editorInteractionEnabled && isActiveViewport && activeToolId === "mesh-edit" && selectedMeshNode && !arcState && !bevelState && !extrudeState && !faceCutState && !faceSubdivisionState ? (
           <MeshEditOverlay
             handles={meshEditHandles}
             meshEditMode={meshEditMode}
@@ -2109,7 +2159,7 @@ export function ViewportCanvas({
             viewport={viewport}
           />
         ) : null}
-        {isActiveViewport ? (
+        {editorInteractionEnabled && isActiveViewport ? (
           <ObjectTransformGizmo
             activeToolId={activeToolId}
             onPreviewNodeTransform={onPreviewNodeTransform}
@@ -2123,11 +2173,11 @@ export function ViewportCanvas({
         ) : null}
       </Canvas>
 
-      {arcState || bevelState || extrudeState || faceCutState || faceSubdivisionState ? (
+      {editorInteractionEnabled && (arcState || bevelState || extrudeState || faceCutState || faceSubdivisionState) ? (
         <div className="pointer-events-none absolute inset-0 z-20 cursor-crosshair" />
       ) : null}
 
-      {marqueeRect ? (
+      {editorInteractionEnabled && marqueeRect ? (
         <div
           className="pointer-events-none absolute rounded-sm bg-emerald-400/12 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.75)]"
           style={{
@@ -2144,6 +2194,41 @@ export function ViewportCanvas({
 
 function emptyEditableMesh(): EditableMesh {
   return { faces: [], halfEdges: [], vertices: [] };
+}
+
+function DefaultViewportSun({ center }: { center: Vec3 }) {
+  const lightRef = useRef<any>(null);
+  const targetRef = useRef<Object3D | null>(null);
+
+  useEffect(() => {
+    if (!lightRef.current || !targetRef.current) {
+      return;
+    }
+
+    lightRef.current.target = targetRef.current;
+    targetRef.current.updateMatrixWorld();
+  }, [center.x, center.y, center.z]);
+
+  return (
+    <>
+      <directionalLight
+        castShadow
+        intensity={1.35}
+        position={[center.x + 28, center.y + 42, center.z + 24]}
+        ref={lightRef}
+        shadow-bias={-0.00015}
+        shadow-camera-bottom={-72}
+        shadow-camera-far={180}
+        shadow-camera-left={-72}
+        shadow-camera-right={72}
+        shadow-camera-top={72}
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
+        shadow-normalBias={0.03}
+      />
+      <object3D position={[center.x, center.y, center.z]} ref={targetRef} />
+    </>
+  );
 }
 
 function resolveViewportConstructionPlane(

@@ -8,8 +8,11 @@ import {
   createExtrudeBrushNodesCommand,
   createDuplicateNodesCommand,
   createEditorCore,
+  createPlaceLightNodeCommand,
   createReplaceNodesCommand,
+  createPlacePrimitiveNodeCommand,
   createSetBrushDataCommand,
+  createSetEntityCommand,
   createSetMeshDataCommand,
   createSetNodeTransformCommand,
   createPlaceEntityCommand,
@@ -22,6 +25,7 @@ import {
   createSetUvScaleCommand,
   createSplitBrushNodeAtCoordinateCommand,
   createSplitBrushNodesCommand,
+  createSetSceneSettingsCommand,
   createTranslateNodesCommand,
   createUpsertMaterialCommand,
   type TransformAxis
@@ -31,17 +35,26 @@ import { deriveRenderScene, gridSnapValues, type ViewportState } from "@web-hamm
 import {
   type GeometryNode,
   isBrushNode,
+  isLightNode,
   isMeshNode,
+  isPrimitiveNode,
   makeTransform,
   type Material,
   type MeshNode,
+  type PrimitiveNodeData,
+  type PrimitiveShape,
   snapVec3,
   vec2,
   vec3,
   type Brush,
   type EditableMesh,
+  type Entity,
+  type EntityType,
+  type LightNodeData,
+  type LightType,
   type Vec2,
-  type Vec3
+  type Vec3,
+  type SceneSettings
 } from "@web-hammer/shared";
 import { createToolSession, defaultToolId, defaultTools, type ToolId } from "@web-hammer/tool-system";
 import {
@@ -58,6 +71,14 @@ import { useExportWorker } from "@/app/hooks/useExportWorker";
 import { clampSnapSize, resolveViewportSnapSize } from "@/viewport/utils/snap";
 import type { MeshEditToolbarActionRequest } from "@/viewport/types";
 import {
+  createDefaultEntity,
+  createDefaultLightData,
+  createDefaultPrimitiveTransform,
+  createLightNodeLabel,
+  createPrimitiveNodeData,
+  createPrimitiveNodeLabel
+} from "@/lib/authoring";
+import {
   focusViewportOnPoint,
   resolveVisibleViewportPaneIds,
   viewportPaneIds,
@@ -68,8 +89,11 @@ import {
 export function App() {
   const [editor] = useState(() => createEditorCore(createSeedSceneDocument()));
   const [activeToolId, setActiveToolId] = useState<ToolId>(defaultToolId);
+  const [activeBrushShape, setActiveBrushShape] = useState<PrimitiveShape>("cube");
   const [meshEditMode, setMeshEditMode] = useState<MeshEditMode>("vertex");
   const [meshEditToolbarAction, setMeshEditToolbarAction] = useState<MeshEditToolbarActionRequest>();
+  const [physicsPlayback, setPhysicsPlayback] = useState<"paused" | "running" | "stopped">("stopped");
+  const [physicsRevision, setPhysicsRevision] = useState(0);
   const [selectedMaterialFaceIds, setSelectedMaterialFaceIds] = useState<string[]>([]);
   const [transformMode, setTransformMode] = useState<"rotate" | "scale" | "translate">("translate");
   const [workerManager] = useState(() => createWorkerTaskManager());
@@ -98,7 +122,7 @@ export function App() {
     setActiveToolId(toolId);
   };
 
-  const handleSetRightPanel = (panel: "inspector" | "materials" | "scene") => {
+  const handleSetRightPanel = (panel: "inspector" | "materials" | "player" | "scene" | "world") => {
     uiStore.rightPanel = panel;
   };
 
@@ -163,6 +187,15 @@ export function App() {
     const node = editor.scene.getNode(nodeId);
 
     if (!node) {
+      const entity = editor.scene.getEntity(nodeId);
+
+      if (!entity) {
+        return;
+      }
+
+      viewportPaneIds.forEach((viewportId) => {
+        focusViewportOnPoint(uiStore.viewports[viewportId], entity.transform.position);
+      });
       return;
     }
 
@@ -204,7 +237,11 @@ export function App() {
     }
 
     editor.execute(createSetNodeTransformCommand(editor.scene, nodeId, transform, beforeTransform));
-    enqueueWorkerJob("Transform update", { task: node.kind === "mesh" ? "triangulation" : "brush-rebuild", worker: "geometryWorker" }, 550);
+    enqueueWorkerJob(
+      "Transform update",
+      { task: node.kind === "brush" ? "brush-rebuild" : "triangulation", worker: "geometryWorker" },
+      550
+    );
   };
 
   const handlePreviewBrushData = (nodeId: string, brush: Brush) => {
@@ -275,6 +312,65 @@ export function App() {
     node.transform = structuredClone(transform);
     editor.scene.touch();
     setRevision((revision) => revision + 1);
+  };
+
+  const handleUpdateEntity = (entityId: string, nextEntity: Entity, beforeEntity?: Entity) => {
+    const entity = editor.scene.getEntity(entityId);
+
+    if (!entity) {
+      return;
+    }
+
+    editor.execute(createSetEntityCommand(editor.scene, entityId, nextEntity, beforeEntity));
+    enqueueWorkerJob("Entity update", { task: "navmesh", worker: "navWorker" }, 450);
+  };
+
+  const handleUpdateEntityTransform = (entityId: string, transform: Transform, beforeTransform?: Transform) => {
+    const entity = editor.scene.getEntity(entityId);
+
+    if (!entity) {
+      return;
+    }
+
+    handleUpdateEntity(
+      entityId,
+      {
+        ...structuredClone(entity),
+        transform: structuredClone(transform)
+      },
+      beforeTransform
+        ? {
+            ...structuredClone(entity),
+            transform: structuredClone(beforeTransform)
+          }
+        : entity
+    );
+  };
+
+  const handleUpdateEntityProperties = (
+    entityId: string,
+    properties: Entity["properties"],
+    beforeProperties?: Entity["properties"]
+  ) => {
+    const entity = editor.scene.getEntity(entityId);
+
+    if (!entity) {
+      return;
+    }
+
+    handleUpdateEntity(
+      entityId,
+      {
+        ...structuredClone(entity),
+        properties: structuredClone(properties)
+      },
+      beforeProperties
+        ? {
+            ...structuredClone(entity),
+            properties: structuredClone(beforeProperties)
+          }
+        : entity
+    );
   };
 
   const enqueueWorkerJob = (label: string, task: Parameters<typeof workerManager.enqueue>[0], durationMs?: number) => {
@@ -400,7 +496,24 @@ export function App() {
     enqueueWorkerJob("Asset placement", { task: "triangulation", worker: "geometryWorker" }, 650);
   };
 
+  const resolvePlacementPosition = (size: Vec3) => {
+    const activeViewportState = resolveActiveViewportState();
+    const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
+
+    return vec3(snappedTarget.x, Math.max(size.y * 0.5, snappedTarget.y), snappedTarget.z);
+  };
+
   const handleCreateBrush = () => {
+    if (activeBrushShape !== "cube") {
+      const data = createPrimitiveNodeData("brush", activeBrushShape);
+      handlePlacePrimitiveNode(
+        data,
+        createDefaultPrimitiveTransform(resolvePlacementPosition(data.size)),
+        createPrimitiveNodeLabel("brush", activeBrushShape)
+      );
+      return;
+    }
+
     const activeViewportState = resolveActiveViewportState();
     const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
     const { command, nodeId } = createPlaceBrushNodeCommand(
@@ -422,6 +535,59 @@ export function App() {
     editor.execute(command);
     editor.select([nodeId], "object");
     enqueueWorkerJob("Brush creation", { task: "brush-rebuild", worker: "geometryWorker" }, 700);
+  };
+
+  const handlePlacePrimitiveNode = (data: PrimitiveNodeData, transform: Transform, name: string) => {
+    const { command, nodeId } = createPlacePrimitiveNodeCommand(editor.scene, transform, {
+      data,
+      name
+    });
+
+    editor.execute(command);
+    editor.select([nodeId], "object");
+    enqueueWorkerJob(
+      `${data.role === "brush" ? "Brush" : "Prop"} placement`,
+      { task: "triangulation", worker: "geometryWorker" },
+      650
+    );
+  };
+
+  const handlePlaceBrushPrimitive = (shape: PrimitiveShape) => {
+    if (shape === "cube") {
+      const activeViewportState = resolveActiveViewportState();
+      const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
+      const { command, nodeId } = createPlaceBrushNodeCommand(
+        editor.scene,
+        makeTransform(vec3(snappedTarget.x, 1.5, snappedTarget.z))
+      );
+
+      editor.execute(command);
+      editor.select([nodeId], "object");
+      enqueueWorkerJob("Brush placement", { task: "brush-rebuild", worker: "geometryWorker" }, 650);
+      return;
+    }
+
+    const data = createPrimitiveNodeData("brush", shape);
+    handlePlacePrimitiveNode(data, createDefaultPrimitiveTransform(resolvePlacementPosition(data.size)), createPrimitiveNodeLabel("brush", shape));
+  };
+
+  const handlePlaceProp = (shape: PrimitiveShape) => {
+    const data = createPrimitiveNodeData("prop", shape);
+    handlePlacePrimitiveNode(data, createDefaultPrimitiveTransform(resolvePlacementPosition(data.size)), createPrimitiveNodeLabel("prop", shape));
+  };
+
+  const handlePlaceLight = (type: LightType) => {
+    const activeViewportState = resolveActiveViewportState();
+    const snappedTarget = snapVec3(activeViewportState.camera.target, resolveViewportSnapSize(activeViewportState));
+    const position = vec3(snappedTarget.x, type === "ambient" ? 0 : 3, snappedTarget.z);
+    const { command, nodeId } = createPlaceLightNodeCommand(editor.scene, makeTransform(position), {
+      data: createDefaultLightData(type),
+      name: createLightNodeLabel(type)
+    });
+
+    editor.execute(command);
+    editor.select([nodeId], "object");
+    enqueueWorkerJob("Light authoring", { task: "triangulation", worker: "geometryWorker" }, 500);
   };
 
   const handleCommitMeshTopology = (nodeId: string, mesh: EditableMesh) => {
@@ -550,26 +716,60 @@ export function App() {
     uiStore.selectedMaterialId = materialId;
   };
 
-  const handlePlaceEntity = (type: "spawn" | "light") => {
+  const handlePlaceEntity = (type: EntityType) => {
     const activeViewportState = resolveActiveViewportState();
-    const position = vec3(
-      activeViewportState.camera.target.x,
-      type === "light" ? 3 : 1,
-      activeViewportState.camera.target.z
-    );
-    const entityId = `entity:${type}:${editor.scene.entities.size + 1}`;
-    editor.execute(
-      createPlaceEntityCommand({
-        id: entityId,
-        properties:
-          type === "light"
-            ? { color: "#ffd089", enabled: true, intensity: 500 }
-            : { enabled: true, team: "player" },
-        transform: makeTransform(position),
-        type
-      })
-    );
+    const position = vec3(activeViewportState.camera.target.x, 1, activeViewportState.camera.target.z);
+    const entity = createDefaultEntity(type, position, editor.scene.entities.size + 1);
+    editor.execute(createPlaceEntityCommand(entity));
+    editor.select([entity.id], "object");
     enqueueWorkerJob("Entity authoring", { task: "navmesh", worker: "navWorker" }, 800);
+  };
+
+  const handleUpdateNodeData = (nodeId: string, data: PrimitiveNodeData | LightNodeData) => {
+    const node = editor.scene.getNode(nodeId);
+
+    if (!node) {
+      return;
+    }
+
+    if (isPrimitiveNode(node)) {
+      const replacement = {
+        ...structuredClone(node),
+        data: structuredClone(data as PrimitiveNodeData)
+      };
+
+      editor.execute(createReplaceNodesCommand(editor.scene, [replacement], "update primitive"));
+      enqueueWorkerJob("Primitive update", { task: "triangulation", worker: "geometryWorker" }, 500);
+      return;
+    }
+
+    if (isLightNode(node)) {
+      const replacement = {
+        ...structuredClone(node),
+        data: structuredClone(data as LightNodeData)
+      };
+
+      editor.execute(createReplaceNodesCommand(editor.scene, [replacement], "update light"));
+      enqueueWorkerJob("Light update", { task: "triangulation", worker: "geometryWorker" }, 500);
+    }
+  };
+
+  const handleUpdateSceneSettings = (settings: SceneSettings, beforeSettings?: SceneSettings) => {
+    editor.execute(createSetSceneSettingsCommand(editor.scene, settings, beforeSettings));
+    enqueueWorkerJob("Scene settings", { task: "triangulation", worker: "geometryWorker" }, 300);
+  };
+
+  const handlePlayPhysics = () => {
+    setPhysicsPlayback("running");
+  };
+
+  const handlePausePhysics = () => {
+    setPhysicsPlayback((current) => (current === "stopped" ? "stopped" : "paused"));
+  };
+
+  const handleStopPhysics = () => {
+    setPhysicsPlayback("stopped");
+    setPhysicsRevision((current) => current + 1);
   };
 
   const handleSaveWhmap = async () => {
@@ -668,6 +868,7 @@ export function App() {
       <EditorShell
         activeRightPanel={ui.rightPanel}
         activeToolId={toolSession.toolId}
+        activeBrushShape={activeBrushShape}
         activeViewportId={ui.activeViewportId}
         canRedo={editor.commands.canRedo()}
         canUndo={editor.commands.canUndo()}
@@ -678,6 +879,7 @@ export function App() {
         onActivateViewport={handleActivateViewport}
         onInvertSelectionNormals={handleInvertSelectionNormals}
         onApplyMaterial={handleApplyMaterial}
+        onActivateBrushTool={() => handleSetToolId("brush")}
         onClipSelection={handleClipSelection}
         onCreateBrush={handleCreateBrush}
         onDeleteSelection={handleDeleteSelection}
@@ -690,12 +892,18 @@ export function App() {
         onExtrudeSelection={handleExtrudeSelection}
         onFocusNode={handleFocusNode}
         onLoadWhmap={handleLoadWhmap}
+        onPausePhysics={handlePausePhysics}
         onMeshEditToolbarAction={handleMeshEditToolbarAction}
         onMeshInflate={handleMeshInflate}
         onMirrorSelection={handleMirrorSelection}
         onPlaceAsset={handlePlaceAsset}
         onPlaceBrush={handlePlaceBrush}
+        onPlaceBrushPrimitive={handlePlaceBrushPrimitive}
         onPlaceEntity={handlePlaceEntity}
+        onPlaceLight={handlePlaceLight}
+        onPlacePrimitiveNode={handlePlacePrimitiveNode}
+        onPlaceProp={handlePlaceProp}
+        onPlayPhysics={handlePlayPhysics}
         onPreviewBrushData={handlePreviewBrushData}
         onPreviewMeshData={handlePreviewMeshData}
         onPreviewNodeTransform={handlePreviewNodeTransform}
@@ -708,8 +916,10 @@ export function App() {
         onSelectNodes={handleSelectNodes}
         onSetMeshEditMode={setMeshEditMode}
         onSetRightPanel={handleSetRightPanel}
+        onSetActiveBrushShape={setActiveBrushShape}
         onSetSnapEnabled={handleSetSnapEnabled}
         onSetSnapSize={handleSetSnapSize}
+        onStopPhysics={handleStopPhysics}
         onSetTransformMode={setTransformMode}
         onSetToolId={handleSetToolId}
         onToggleViewportQuality={handleToggleViewportQuality}
@@ -717,13 +927,20 @@ export function App() {
         onSplitBrushAtCoordinate={handleSplitBrushAtCoordinate}
         onTranslateSelection={handleTranslateSelection}
         onUndo={handleUndo}
+        onUpdateEntityProperties={handleUpdateEntityProperties}
+        onUpdateEntityTransform={handleUpdateEntityTransform}
+        onUpdateNodeData={handleUpdateNodeData}
+        onUpdateSceneSettings={handleUpdateSceneSettings}
         onUpdateViewport={handleUpdateViewport}
         onUpsertMaterial={handleUpsertMaterial}
         onUpdateBrushData={handleUpdateBrushData}
         onUpdateMeshData={handleUpdateMeshData}
         onUpdateNodeTransform={handleUpdateNodeTransform}
         meshEditMode={meshEditMode}
+        physicsPlayback={physicsPlayback}
+        physicsRevision={physicsRevision}
         renderScene={renderScene}
+        sceneSettings={editor.scene.settings}
         selectedAssetId={ui.selectedAssetId}
         selectedFaceIds={selectedMaterialFaceIds}
         selectedMaterialId={ui.selectedMaterialId}

@@ -6,9 +6,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@types/three": "^0.181.0",
     "@web-hammer/editor-core": "workspace:*",
     "@web-hammer/geometry-kernel": "workspace:*",
     "@web-hammer/shared": "workspace:*",
-    "comlink": "^4.4.2"
+    "comlink": "^4.4.2",
+    "three": "^0.181.1"
   }
 }
