@@ -147,6 +147,99 @@ input[type="file"] {
   display: none;
 }
 
+.runtime-panel {
+  position: absolute;
+  top: 4.2rem;
+  right: 1rem;
+  z-index: 10;
+  width: min(19rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 5.2rem);
+  overflow: auto;
+  padding: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.15rem;
+  background: rgba(12, 15, 18, 0.84);
+  backdrop-filter: blur(14px);
+}
+
+.runtime-panel__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+.runtime-panel__eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.runtime-panel__title {
+  margin-top: 0.15rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.runtime-panel__section + .runtime-panel__section {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.runtime-panel__subhead {
+  margin-bottom: 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.runtime-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.9rem;
+}
+
+.runtime-toggle + .runtime-toggle {
+  margin-top: 0.5rem;
+}
+
+.runtime-toggle input {
+  accent-color: #5de0b6;
+}
+
+.runtime-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.runtime-actions button {
+  width: 100%;
+}
+
+.runtime-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.runtime-log__empty,
+.runtime-log__entry {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.78rem;
+}
+
+.runtime-log__empty {
+  color: rgba(255, 255, 255, 0.48);
+}
+
 @media (max-width: 720px) {
   .topbar {
     grid-template-columns: 1fr;
@@ -156,5 +249,14 @@ input[type="file"] {
   .status {
     min-width: 0;
     text-align: left;
+  }
+
+  .runtime-panel {
+    top: auto;
+    right: 1rem;
+    bottom: 1rem;
+    left: 1rem;
+    width: auto;
+    max-height: 40vh;
   }
 }

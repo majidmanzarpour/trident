@@ -124,6 +124,29 @@ export function createSampleScene(): WebHammerEngineScene {
       },
       {
         data: {},
+        hooks: [
+          {
+            config: {
+              active: true,
+              loop: true,
+              pathId: "sample:spire-loop",
+              reverse: false,
+              speed: 0.14,
+              stopAtEnd: false
+            },
+            enabled: true,
+            id: "hook:sample:spire:path",
+            type: "path_mover"
+          },
+          {
+            config: {
+              tags: ["demo", "moving"]
+            },
+            enabled: true,
+            id: "hook:sample:spire:tags",
+            type: "tags"
+          }
+        ],
         id: "node:sample:spire-group",
         kind: "group",
         name: "Spire Cluster",
@@ -165,6 +188,63 @@ export function createSampleScene(): WebHammerEngineScene {
           position: { x: 0, y: 3.1, z: 0 },
           rotation: { x: 0, y: -0.3, z: 0 },
           scale: { x: 1.3, y: 1.3, z: 1.3 }
+        }
+      },
+      {
+        data: {},
+        hooks: [
+          {
+            config: {
+              initialState: "closed",
+              mode: "slide"
+            },
+            enabled: true,
+            id: "hook:sample:door:openable",
+            type: "openable"
+          },
+          {
+            config: {
+              duration: 1.1,
+              kind: "lerp_transform",
+              targets: {
+                closed: {
+                  position: [4.8, 1.1, 2.2]
+                },
+                open: {
+                  position: [6.8, 1.1, 2.2]
+                }
+              }
+            },
+            enabled: true,
+            id: "hook:sample:door:mover",
+            type: "mover"
+          }
+        ],
+        id: "node:sample:door-root",
+        kind: "group",
+        name: "Sliding Door",
+        transform: {
+          position: { x: 4.8, y: 1.1, z: 2.2 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
+        }
+      },
+      {
+        data: {
+          materialId: propMaterial.id,
+          role: "prop",
+          shape: "cube",
+          size: { x: 1.2, y: 2.2, z: 0.28 }
+        },
+        geometry: geometryFromPrimitive(new BoxGeometry(1.2, 2.2, 0.28), propMaterial),
+        id: "node:sample:door-panel",
+        kind: "primitive",
+        name: "Door Panel",
+        parentId: "node:sample:door-root",
+        transform: {
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
         }
       },
       {

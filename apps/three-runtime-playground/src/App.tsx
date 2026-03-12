@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createGameplayRuntime,
+  createMoverSystemDefinition,
+  createOpenableSystemDefinition,
+  createPathMoverSystemDefinition,
+  createWaypointPath
+} from "@web-hammer/gameplay-runtime";
+import {
   createWebHammerBundleAssetResolver,
   parseWebHammerEngineBundleZip,
   parseWebHammerEngineScene,
@@ -7,8 +14,12 @@ import {
 } from "@web-hammer/three-runtime";
 import { normalizeSceneSettings, type PlayerCameraMode } from "@web-hammer/shared";
 import { createPlaybackRenderScene } from "./adapter";
+import { createPlaybackGameplayHost } from "./gameplay-host";
 import { PlaybackScene } from "./PlaybackScene";
 import { createSampleScene, resolveSampleAssetPath } from "./sample-scene";
+
+const SAMPLE_DOOR_ID = "node:sample:door-root";
+const SAMPLE_PATH_ID = "node:sample:spire-group";
 
 export function App() {
   const [scene, setScene] = useState<WebHammerEngineScene>(createSampleScene());
@@ -17,12 +28,63 @@ export function App() {
   const [physicsPlayback, setPhysicsPlayback] = useState<"paused" | "running" | "stopped">("stopped");
   const [physicsRevision, setPhysicsRevision] = useState(0);
   const [cameraMode, setCameraMode] = useState<PlayerCameraMode>("third-person");
+  const [runtimeEvents, setRuntimeEvents] = useState<string[]>([]);
+  const [enabledSystems, setEnabledSystems] = useState({
+    mover: true,
+    openable: true,
+    pathMover: true
+  });
   const [resolveAssetPath, setResolveAssetPath] = useState<(path: string) => Promise<string> | string>(() => resolveSampleAssetPath);
   const bundleResolverRef = useRef<ReturnType<typeof createWebHammerBundleAssetResolver> | undefined>(undefined);
+  const gameplayHostRef = useRef(createPlaybackGameplayHost());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedSceneSettings = useMemo(() => normalizeSceneSettings(scene.settings), [scene.settings]);
 
   const renderScene = useMemo(() => createPlaybackRenderScene(scene), [scene]);
+  const gameplaySystems = useMemo(() => {
+    const systems = [];
+
+    if (enabledSystems.openable) {
+      systems.push(createOpenableSystemDefinition());
+    }
+
+    if (enabledSystems.mover) {
+      systems.push(createMoverSystemDefinition());
+    }
+
+    if (enabledSystems.pathMover) {
+      const samplePath = createWaypointPath(
+        [
+          { x: -2.8, y: 0, z: -1.5 },
+          { x: -1.25, y: 0, z: -0.4 },
+          { x: -2.8, y: 0, z: 0.95 },
+          { x: -4.35, y: 0, z: -0.4 },
+          { x: -2.8, y: 0, z: -1.5 }
+        ],
+        true
+      );
+
+      systems.push(
+        createPathMoverSystemDefinition((target) =>
+          target.hook.type === "path_mover" && target.targetId === SAMPLE_PATH_ID ? samplePath : undefined
+        )
+      );
+    }
+
+    return systems;
+  }, [enabledSystems]);
+  const gameplayRuntime = useMemo(
+    () =>
+      createGameplayRuntime({
+        host: gameplayHostRef.current.host,
+        scene: {
+          entities: scene.entities,
+          nodes: scene.nodes
+        },
+        systems: gameplaySystems
+      }),
+    [gameplaySystems, scene.entities, scene.nodes]
+  );
 
   useEffect(() => {
     setCameraMode(normalizedSceneSettings.player.cameraMode);
@@ -31,8 +93,26 @@ export function App() {
   useEffect(() => {
     return () => {
       bundleResolverRef.current?.dispose();
+      gameplayRuntime.dispose();
     };
-  }, []);
+  }, [gameplayRuntime]);
+
+  useEffect(() => {
+    gameplayHostRef.current.reset();
+    setRuntimeEvents([]);
+    const unsubscribe = gameplayRuntime.onEvent((event) => {
+      setRuntimeEvents((current) =>
+        [`${event.event}${event.targetId ? ` -> ${event.targetId}` : ""}`, ...current].slice(0, 10)
+      );
+    });
+
+    gameplayRuntime.start();
+
+    return () => {
+      unsubscribe();
+      gameplayRuntime.dispose();
+    };
+  }, [gameplayRuntime]);
 
   const loadSample = () => {
     bundleResolverRef.current?.dispose();
@@ -41,6 +121,7 @@ export function App() {
     setResolveAssetPath(() => resolveSampleAssetPath);
     setPhysicsPlayback("stopped");
     setPhysicsRevision((current) => current + 1);
+    setRuntimeEvents([]);
     setError(undefined);
     setStatus("Sample scene loaded");
   };
@@ -72,11 +153,21 @@ export function App() {
       setResolveAssetPath(() => nextResolver);
       setPhysicsPlayback("stopped");
       setPhysicsRevision((current) => current + 1);
+      setRuntimeEvents([]);
       setStatus(`${file.name}: ${createPlaybackRenderScene(nextScene).meshes.length} meshes`);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to import runtime bundle.");
       setStatus("Import failed");
     }
+  };
+
+  const emitRuntimeEvent = (event: string, targetId: string) => {
+    gameplayRuntime.emitEvent({
+      event,
+      sourceId: "playground",
+      sourceKind: "system",
+      targetId
+    });
   };
 
   return (
@@ -124,6 +215,8 @@ export function App() {
       <main id="stage">
         <PlaybackScene
           cameraMode={cameraMode}
+          gameplayRuntime={gameplayRuntime}
+          onNodeObjectChange={gameplayHostRef.current.bindNodeObject}
           physicsRevision={physicsRevision}
           physicsPlayback={physicsPlayback}
           renderScene={renderScene}
@@ -131,6 +224,58 @@ export function App() {
           sceneSettings={normalizedSceneSettings}
         />
       </main>
+
+      <aside className="runtime-panel">
+        <div className="runtime-panel__header">
+          <div>
+            <div className="runtime-panel__eyebrow">Gameplay Runtime</div>
+            <div className="runtime-panel__title">Systems</div>
+          </div>
+        </div>
+        <div className="runtime-panel__section">
+          {([
+            ["openable", "Openable"],
+            ["mover", "Mover"],
+            ["pathMover", "Path Mover"]
+          ] as const).map(([key, label]) => (
+            <label className="runtime-toggle" key={key}>
+              <input
+                checked={enabledSystems[key]}
+                onChange={(event) =>
+                  setEnabledSystems((current) => ({
+                    ...current,
+                    [key]: event.target.checked
+                  }))
+                }
+                type="checkbox"
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+        <div className="runtime-panel__section">
+          <div className="runtime-panel__subhead">Emit Demo Events</div>
+          <div className="runtime-actions">
+            <button onClick={() => emitRuntimeEvent("open.requested", SAMPLE_DOOR_ID)} type="button">Door Open</button>
+            <button onClick={() => emitRuntimeEvent("close.requested", SAMPLE_DOOR_ID)} type="button">Door Close</button>
+            <button onClick={() => emitRuntimeEvent("toggle.requested", SAMPLE_DOOR_ID)} type="button">Door Toggle</button>
+            <button onClick={() => emitRuntimeEvent("path.start", SAMPLE_PATH_ID)} type="button">Path Start</button>
+            <button onClick={() => emitRuntimeEvent("path.stop", SAMPLE_PATH_ID)} type="button">Path Stop</button>
+            <button onClick={() => emitRuntimeEvent("path.reverse", SAMPLE_PATH_ID)} type="button">Path Reverse</button>
+          </div>
+        </div>
+        <div className="runtime-panel__section">
+          <div className="runtime-panel__subhead">Event Log</div>
+          <div className="runtime-log">
+            {runtimeEvents.length === 0 ? <div className="runtime-log__empty">No events yet</div> : null}
+            {runtimeEvents.map((entry) => (
+              <div className="runtime-log__entry" key={entry}>
+                {entry}
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
 
       <div className={`error-banner${error ? "" : " hidden"}`}>{error}</div>
     </div>

@@ -40,6 +40,7 @@ import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { DerivedEntityMarker, DerivedLight, DerivedRenderMesh, DerivedRenderScene } from "@web-hammer/render-pipeline";
 import { createBlockoutTextureDataUri, resolveTransformPivot, toTuple, type MaterialRenderSide, type SceneSettings } from "@web-hammer/shared";
+import type { GameplayRuntime } from "@web-hammer/gameplay-runtime";
 
 const previewTextureCache = new Map<string, ReturnType<TextureLoader["load"]>>();
 const modelSceneCache = new Map<string, Object3D>();
@@ -55,6 +56,8 @@ type OrbitControlsHandle = {
 
 export function PlaybackScene({
   cameraMode,
+  gameplayRuntime,
+  onNodeObjectChange,
   physicsPlayback,
   physicsRevision,
   renderScene,
@@ -62,6 +65,8 @@ export function PlaybackScene({
   sceneSettings
 }: {
   cameraMode: "fps" | "third-person" | "top-down";
+  gameplayRuntime?: GameplayRuntime;
+  onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
   physicsPlayback: "paused" | "running" | "stopped";
   physicsRevision: number;
   renderScene: DerivedRenderScene;
@@ -86,9 +91,11 @@ export function PlaybackScene({
       <color args={[effectiveSettings.world.fogColor]} attach="background" />
       <fog attach="fog" args={[effectiveSettings.world.fogColor, effectiveSettings.world.fogNear, effectiveSettings.world.fogFar]} />
       <ambientLight color={effectiveSettings.world.ambientColor} intensity={effectiveSettings.world.ambientIntensity} />
+      <GameplayRuntimeTicker gameplayRuntime={gameplayRuntime} />
       <FrameSceneCamera active={physicsPlayback === "stopped"} controlsRef={controlsRef} worldRootRef={worldRootRef} />
       <group ref={worldRootRef}>
         <PlaybackWorld
+          onNodeObjectChange={onNodeObjectChange}
           physicsPlayback={physicsPlayback}
           physicsRevision={physicsRevision}
           renderScene={renderScene}
@@ -102,12 +109,14 @@ export function PlaybackScene({
 }
 
 function PlaybackWorld({
+  onNodeObjectChange,
   physicsPlayback,
   physicsRevision,
   renderScene,
   resolveAssetPath,
   sceneSettings
 }: {
+  onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
   physicsPlayback: "paused" | "running" | "stopped";
   physicsRevision: number;
   renderScene: DerivedRenderScene;
@@ -124,7 +133,7 @@ function PlaybackWorld({
   return (
     <>
       {staticMeshes.map((mesh) => (
-        <RenderStaticMesh key={mesh.nodeId} mesh={mesh} resolveAssetPath={resolveAssetPath} />
+        <RenderStaticMesh key={mesh.nodeId} mesh={mesh} onNodeObjectChange={onNodeObjectChange} resolveAssetPath={resolveAssetPath} />
       ))}
 
       {physicsActive ? (
@@ -151,10 +160,18 @@ function PlaybackWorld({
       ) : null}
 
       {renderScene.lights.map((light) => (
-        <RenderLightNode key={light.nodeId} light={light} />
+        <RenderLightNode key={light.nodeId} light={light} onNodeObjectChange={onNodeObjectChange} />
       ))}
     </>
   );
+}
+
+function GameplayRuntimeTicker({ gameplayRuntime }: { gameplayRuntime?: GameplayRuntime }) {
+  useFrame((_, deltaSeconds) => {
+    gameplayRuntime?.update(deltaSeconds);
+  });
+
+  return null;
 }
 
 function FrameSceneCamera({
@@ -470,13 +487,30 @@ function RuntimePlayer({
   );
 }
 
-function RenderStaticMesh({ mesh, resolveAssetPath }: { mesh: DerivedRenderMesh; resolveAssetPath: AssetPathResolver }) {
+function RenderStaticMesh({
+  mesh,
+  onNodeObjectChange,
+  resolveAssetPath
+}: {
+  mesh: DerivedRenderMesh;
+  onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
+  resolveAssetPath: AssetPathResolver;
+}) {
+  const groupRef = useRef<Group | null>(null);
+
+  useEffect(() => {
+    onNodeObjectChange?.(mesh.nodeId, groupRef.current);
+    return () => {
+      onNodeObjectChange?.(mesh.nodeId, null);
+    };
+  }, [mesh.nodeId, onNodeObjectChange]);
+
   if (!mesh.surface && !mesh.primitive && !mesh.modelPath) {
     return null;
   }
 
   return (
-    <group position={toTuple(mesh.position)} rotation={toTuple(mesh.rotation)} scale={toTuple(mesh.scale)}>
+    <group position={toTuple(mesh.position)} ref={groupRef} rotation={toTuple(mesh.rotation)} scale={toTuple(mesh.scale)}>
       <RenderNodeBody mesh={mesh} resolveAssetPath={resolveAssetPath} />
     </group>
   );
@@ -751,9 +785,16 @@ function computeModelBounds(scene: Object3D) {
   };
 }
 
-function RenderLightNode({ light }: { light: DerivedLight }) {
+function RenderLightNode({
+  light,
+  onNodeObjectChange
+}: {
+  light: DerivedLight;
+  onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
+}) {
   const targetRef = useRef<Object3D | null>(null);
   const lightRef = useRef<{ target?: Object3D } | null>(null);
+  const groupRef = useRef<Group | null>(null);
 
   useEffect(() => {
     if (lightRef.current && targetRef.current) {
@@ -762,12 +803,19 @@ function RenderLightNode({ light }: { light: DerivedLight }) {
     }
   }, [light.nodeId, light.rotation.x, light.rotation.y, light.rotation.z]);
 
+  useEffect(() => {
+    onNodeObjectChange?.(light.nodeId, groupRef.current);
+    return () => {
+      onNodeObjectChange?.(light.nodeId, null);
+    };
+  }, [light.nodeId, onNodeObjectChange]);
+
   if (!light.data.enabled) {
     return null;
   }
 
   return (
-    <group position={toTuple(light.position)} rotation={toTuple(light.rotation)}>
+    <group position={toTuple(light.position)} ref={groupRef} rotation={toTuple(light.rotation)}>
       {light.data.type === "ambient" ? <ambientLight color={light.data.color} intensity={light.data.intensity} /> : null}
       {light.data.type === "hemisphere" ? (
         <hemisphereLight args={[light.data.color, light.data.groundColor ?? "#0f1721", light.data.intensity]} />
