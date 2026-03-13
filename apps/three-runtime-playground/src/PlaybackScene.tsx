@@ -39,7 +39,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { DerivedEntityMarker, DerivedLight, DerivedRenderMesh, DerivedRenderScene } from "@web-hammer/render-pipeline";
-import { createBlockoutTextureDataUri, resolveTransformPivot, toTuple, type MaterialRenderSide, type SceneSettings } from "@web-hammer/shared";
+import { createBlockoutTextureDataUri, resolveTransformPivot, toTuple, vec3, type MaterialRenderSide, type SceneSettings, type Vec3 } from "@web-hammer/shared";
 import type { GameplayRuntime } from "@web-hammer/gameplay-runtime";
 
 const previewTextureCache = new Map<string, ReturnType<TextureLoader["load"]>>();
@@ -58,6 +58,7 @@ export function PlaybackScene({
   cameraMode,
   gameplayRuntime,
   onNodeObjectChange,
+  onPlayerActorChange,
   physicsPlayback,
   physicsRevision,
   renderScene,
@@ -67,6 +68,7 @@ export function PlaybackScene({
   cameraMode: "fps" | "third-person" | "top-down";
   gameplayRuntime?: GameplayRuntime;
   onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
+  onPlayerActorChange?: (actor: { id: string; position: Vec3; tags: string[] } | null) => void;
   physicsPlayback: "paused" | "running" | "stopped";
   physicsRevision: number;
   renderScene: DerivedRenderScene;
@@ -96,6 +98,7 @@ export function PlaybackScene({
       <group ref={worldRootRef}>
         <PlaybackWorld
           onNodeObjectChange={onNodeObjectChange}
+          onPlayerActorChange={onPlayerActorChange}
           physicsPlayback={physicsPlayback}
           physicsRevision={physicsRevision}
           renderScene={renderScene}
@@ -110,6 +113,7 @@ export function PlaybackScene({
 
 function PlaybackWorld({
   onNodeObjectChange,
+  onPlayerActorChange,
   physicsPlayback,
   physicsRevision,
   renderScene,
@@ -117,6 +121,7 @@ function PlaybackWorld({
   sceneSettings
 }: {
   onNodeObjectChange?: (nodeId: string, object: Object3D | null) => void;
+  onPlayerActorChange?: (actor: { id: string; position: Vec3; tags: string[] } | null) => void;
   physicsPlayback: "paused" | "running" | "stopped";
   physicsRevision: number;
   renderScene: DerivedRenderScene;
@@ -151,6 +156,7 @@ function PlaybackWorld({
           ))}
           {playerSpawn ? (
             <RuntimePlayer
+              onActorChange={onPlayerActorChange}
               physicsPlayback={physicsPlayback}
               sceneSettings={sceneSettings}
               spawn={playerSpawn}
@@ -217,10 +223,12 @@ function FrameSceneCamera({
 }
 
 function RuntimePlayer({
+  onActorChange,
   physicsPlayback,
   sceneSettings,
   spawn
 }: {
+  onActorChange?: (actor: { id: string; position: Vec3; tags: string[] } | null) => void;
   physicsPlayback: "paused" | "running" | "stopped";
   sceneSettings: SceneSettings;
   spawn: DerivedEntityMarker;
@@ -343,6 +351,10 @@ function RuntimePlayer({
     document.exitPointerLock();
   }, [gl, physicsPlayback]);
 
+  useEffect(() => () => {
+    onActorChange?.(null);
+  }, [onActorChange]);
+
   useFrame((_, delta) => {
     const body = bodyRef.current;
 
@@ -453,6 +465,12 @@ function RuntimePlayer({
       camera.position.lerp(nextCameraPosition, 1 - Math.exp(-delta * 8));
       camera.lookAt(eyePosition);
     }
+
+    onActorChange?.({
+      id: "player",
+      position: vec3(translation.x, translation.y, translation.z),
+      tags: ["player"]
+    });
   });
 
   return (

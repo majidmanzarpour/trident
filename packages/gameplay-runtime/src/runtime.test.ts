@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { makeTransform, vec3, type Entity, type GeometryNode } from "@web-hammer/shared";
 import { createGameplayRuntime } from "./runtime";
-import { createMoverSystemDefinition, createOpenableSystemDefinition, createPathMoverSystemDefinition, createWaypointPath } from "./systems";
+import {
+  createMoverSystemDefinition,
+  createOpenableSystemDefinition,
+  createPathMoverSystemDefinition,
+  createSequenceSystemDefinition,
+  createTriggerSystemDefinition,
+  createWaypointPath
+} from "./systems";
 
 describe("gameplay runtime", () => {
   test("routes openable events through mover transforms", () => {
@@ -146,5 +153,137 @@ describe("gameplay runtime", () => {
     runtime.update(0);
 
     expect(events).toEqual(["open.requested", "open.started", "move.to"]);
+  });
+
+  test("emits trigger enter and exit for tracked actors", () => {
+    const node: GeometryNode = {
+      data: {},
+      hooks: [
+        {
+          config: {
+            filters: ["player"],
+            fireOnce: false,
+            shape: "box",
+            size: [2, 2, 2]
+          },
+          id: "hook:trigger",
+          type: "trigger_volume"
+        }
+      ],
+      id: "node:trigger",
+      kind: "group",
+      name: "Trigger",
+      transform: makeTransform(vec3(0, 0, 0))
+    };
+    const runtime = createGameplayRuntime({
+      scene: {
+        entities: [],
+        nodes: [node]
+      },
+      systems: [createTriggerSystemDefinition()]
+    });
+    const events: string[] = [];
+
+    runtime.onEvent((event) => {
+      events.push(event.event);
+    });
+    runtime.start();
+    runtime.updateActor({
+      id: "player",
+      position: vec3(0, 0, 0),
+      tags: ["player"]
+    });
+    runtime.update(0);
+    runtime.updateActor({
+      id: "player",
+      position: vec3(4, 0, 0),
+      tags: ["player"]
+    });
+    runtime.update(0);
+
+    expect(events).toContain("trigger.enter");
+    expect(events).toContain("trigger.exit");
+  });
+
+  test("starts a path mover from a trigger-driven sequence", () => {
+    const node: GeometryNode = {
+      data: {},
+      hooks: [
+        {
+          config: {
+            active: false,
+            loop: false,
+            pathId: "sample:platform-route",
+            speed: 1,
+            stopAtEnd: true
+          },
+          id: "hook:path",
+          type: "path_mover"
+        },
+        {
+          config: {
+            filters: ["player"],
+            fireOnce: true,
+            shape: "box",
+            size: [2, 2, 2]
+          },
+          id: "hook:trigger",
+          type: "trigger_volume"
+        },
+        {
+          config: {
+            actions: [
+              {
+                event: "path.start",
+                target: "node:platform",
+                type: "emit"
+              }
+            ],
+            trigger: {
+              event: "trigger.enter",
+              fromEntity: "node:platform",
+              once: true
+            }
+          },
+          id: "hook:sequence",
+          type: "sequence"
+        }
+      ],
+      id: "node:platform",
+      kind: "group",
+      name: "Platform",
+      transform: makeTransform(vec3(0, 0, 0))
+    };
+    const runtime = createGameplayRuntime({
+      scene: {
+        entities: [],
+        nodes: [node]
+      },
+      systems: [
+        createTriggerSystemDefinition(),
+        createSequenceSystemDefinition(),
+        createPathMoverSystemDefinition((target) =>
+          target.targetId === node.id ? createWaypointPath([vec3(0, 0, 0), vec3(0, 0, 4)]) : undefined
+        )
+      ]
+    });
+    const events: string[] = [];
+
+    runtime.onEvent((event) => {
+      events.push(event.event);
+    });
+    runtime.start();
+    runtime.updateActor({
+      id: "player",
+      position: vec3(0, 0, 0),
+      tags: ["player"]
+    });
+    runtime.update(0);
+    runtime.update(0.5);
+
+    expect(events).toContain("trigger.enter");
+    expect(events).toContain("sequence.started");
+    expect(events).toContain("path.started");
+    expect(runtime.getNodeWorldTransform(node.id)?.position.z).toBeCloseTo(2, 4);
   });
 });

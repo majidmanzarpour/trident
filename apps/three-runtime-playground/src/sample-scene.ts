@@ -48,7 +48,7 @@ export function createSampleScene(): WebHammerEngineScene {
           team: "blue"
         },
         transform: {
-          position: { x: -3, y: 0.5, z: 2 },
+          position: { x: 1.6, y: 0.5, z: 6.4 },
           rotation: { x: 0, y: 0.25, z: 0 },
           scale: { x: 1, y: 1, z: 1 }
         },
@@ -243,6 +243,101 @@ export function createSampleScene(): WebHammerEngineScene {
         parentId: "node:sample:door-root",
         transform: {
           position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
+        }
+      },
+      {
+        data: {},
+        hooks: [
+          {
+            config: {
+              active: false,
+              loop: false,
+              pathId: "sample:platform-route",
+              reverse: false,
+              speed: 0.55,
+              stopAtEnd: true
+            },
+            enabled: true,
+            id: "hook:sample:platform:path",
+            type: "path_mover"
+          },
+          {
+            config: {
+              cooldown: 0,
+              filters: ["player"],
+              fireOnce: true,
+              shape: "box",
+              size: [2.6, 1.4, 2.6]
+            },
+            enabled: true,
+            id: "hook:sample:platform:trigger",
+            type: "trigger_volume"
+          },
+          {
+            config: {
+              actions: [
+                {
+                  event: "path.start",
+                  payload: null,
+                  target: "node:sample:platform-root",
+                  type: "emit"
+                }
+              ],
+              trigger: {
+                event: "trigger.enter",
+                fromEntity: "node:sample:platform-root",
+                once: true
+              }
+            },
+            enabled: true,
+            id: "hook:sample:platform:sequence",
+            type: "sequence"
+          }
+        ],
+        id: "node:sample:platform-root",
+        kind: "group",
+        name: "Moving Platform",
+        transform: {
+          position: { x: 1.6, y: 0.45, z: 3.8 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
+        }
+      },
+      {
+        data: {
+          materialId: propMaterial.id,
+          role: "brush",
+          shape: "cube",
+          size: { x: 2.6, y: 0.3, z: 2.6 }
+        },
+        geometry: geometryFromPrimitive(new BoxGeometry(2.6, 0.3, 2.6), propMaterial),
+        id: "node:sample:platform-top",
+        kind: "primitive",
+        name: "Platform Top",
+        parentId: "node:sample:platform-root",
+        transform: {
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 }
+        }
+      },
+      {
+        data: {
+          materialId: propMaterial.id,
+          radialSegments: 12,
+          role: "brush",
+          shape: "cylinder",
+          size: { x: 0.3, y: 0.9, z: 0.3 }
+        },
+        geometry: geometryFromPrimitive(new CylinderGeometry(0.15, 0.15, 0.9, 12), propMaterial),
+        id: "node:sample:platform-pillar",
+        kind: "primitive",
+        name: "Platform Pillar",
+        parentId: "node:sample:platform-root",
+        transform: {
+          position: { x: 0, y: -0.6, z: 0 },
           rotation: { x: 0, y: 0, z: 0 },
           scale: { x: 1, y: 1, z: 1 }
         }

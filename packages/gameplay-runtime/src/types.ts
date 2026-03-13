@@ -7,6 +7,12 @@ export type GameplayRuntimeScene = {
   nodes: GeometryNode[];
 };
 
+export type GameplayActor = {
+  id: string;
+  position: Vec3;
+  tags?: string[];
+};
+
 export type GameplayHookTarget = {
   entity?: Entity;
   hook: SceneHook;
@@ -53,7 +59,10 @@ export type GameplayRuntimeStateStore = {
 };
 
 export type GameplayRuntimeSceneStore = GameplayRuntimeStateStore & {
+  actorsById: ReadonlyMap<string, GameplayActor>;
   entitiesById: ReadonlyMap<string, Entity>;
+  getActor: (actorId: string) => GameplayActor | undefined;
+  getActors: () => GameplayActor[];
   getEntity: (entityId: string) => Entity | undefined;
   getEntityWorldTransform: (entityId: string) => Transform | undefined;
   getHookTarget: (targetId: string, hookId: string) => GameplayHookTarget | undefined;
@@ -65,10 +74,12 @@ export type GameplayRuntimeSceneStore = GameplayRuntimeStateStore & {
   getTargetLocalTransform: (targetId: string) => Transform | undefined;
   getTargetWorldTransform: (targetId: string) => Transform | undefined;
   nodesById: ReadonlyMap<string, GeometryNode>;
+  removeActor: (actorId: string) => void;
   resetTargetLocalTransform: (targetId: string) => void;
   setTargetLocalTransform: (targetId: string, transform: Transform) => void;
   syncWorldTransforms: () => void;
   translateTarget: (targetId: string, offset: Vec3) => void;
+  upsertActor: (actor: GameplayActor) => void;
 };
 
 export type GameplayRuntimeEventBus = {
@@ -90,6 +101,8 @@ export type GameplayRuntimeSystem = {
 export type GameplayRuntimeApi = GameplayRuntimeStateStore & {
   emitEvent: (input: GameplayEventInput) => GameplayEvent;
   emitFromHookTarget: (target: GameplayHookTarget, eventName: string, payload?: GameplayEvent["payload"], targetId?: string) => GameplayEvent;
+  getActor: (actorId: string) => GameplayActor | undefined;
+  getActors: () => GameplayActor[];
   getEntity: (entityId: string) => Entity | undefined;
   getEntityWorldTransform: (entityId: string) => Transform | undefined;
   getHookTarget: (targetId: string, hookId: string) => GameplayHookTarget | undefined;
@@ -104,9 +117,11 @@ export type GameplayRuntimeApi = GameplayRuntimeStateStore & {
     filter: GameplayEventFilter | ((event: GameplayEvent) => void),
     listener?: (event: GameplayEvent) => void
   ) => () => void;
+  removeActor: (actorId: string) => void;
   resetTargetLocalTransform: (targetId: string) => void;
   setTargetLocalTransform: (targetId: string, transform: Transform) => void;
   translateTarget: (targetId: string, offset: Vec3) => void;
+  updateActor: (actor: GameplayActor) => void;
 };
 
 export type GameplayRuntimeSystemContext = GameplayRuntimeApi & {

@@ -1,5 +1,5 @@
 import { addVec3, resolveSceneGraph, type Entity, type GameplayValue, type GeometryNode, type Transform } from "@web-hammer/shared";
-import { type GameplayHookTarget, type GameplayRuntimeHost, type GameplayRuntimeScene, type GameplayRuntimeSceneStore } from "./types";
+import { type GameplayActor, type GameplayHookTarget, type GameplayRuntimeHost, type GameplayRuntimeScene, type GameplayRuntimeSceneStore } from "./types";
 
 type GameplaySceneStoreOptions = {
   host?: GameplayRuntimeHost;
@@ -10,6 +10,7 @@ export function createGameplaySceneStore({
   host,
   scene
 }: GameplaySceneStoreOptions): GameplayRuntimeSceneStore {
+  const actorsById = new Map<string, GameplayActor>();
   const nodesById = new Map(scene.nodes.map((node) => [node.id, structuredClone(node)] as const));
   const entitiesById = new Map(scene.entities.map((entity) => [entity.id, structuredClone(entity)] as const));
   const initialNodeTransforms = new Map(scene.nodes.map((node) => [node.id, structuredClone(node.transform)] as const));
@@ -46,7 +47,14 @@ export function createGameplaySceneStore({
   };
 
   return {
+    actorsById,
     entitiesById,
+    getActor(actorId) {
+      return actorsById.get(actorId);
+    },
+    getActors() {
+      return Array.from(actorsById.values());
+    },
     getEntity(entityId) {
       return entitiesById.get(entityId);
     },
@@ -87,6 +95,9 @@ export function createGameplaySceneStore({
       return readScopedState(worldState, key);
     },
     nodesById,
+    removeActor(actorId) {
+      actorsById.delete(actorId);
+    },
     resetTargetLocalTransform(targetId) {
       const initialTransform = initialNodeTransforms.get(targetId) ?? initialEntityTransforms.get(targetId);
 
@@ -133,6 +144,9 @@ export function createGameplaySceneStore({
         ...currentTransform,
         position: addVec3(currentTransform.position, offset)
       });
+    },
+    upsertActor(actor) {
+      actorsById.set(actor.id, structuredClone(actor));
     }
   };
 }

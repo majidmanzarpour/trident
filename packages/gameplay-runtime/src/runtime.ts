@@ -1,6 +1,6 @@
 import { createGameplayEventBus } from "./event-bus";
 import { createGameplaySceneStore } from "./scene-store";
-import { type GameplayEventInput, type GameplayHookTarget, type GameplayRuntime, type GameplayRuntimeApi, type GameplayRuntimeHost, type GameplayRuntimeScene, type GameplayRuntimeSystemContext, type GameplayRuntimeSystemDefinition } from "./types";
+import { type GameplayActor, type GameplayEventInput, type GameplayHookTarget, type GameplayRuntime, type GameplayRuntimeApi, type GameplayRuntimeHost, type GameplayRuntimeScene, type GameplayRuntimeSystemContext, type GameplayRuntimeSystemDefinition } from "./types";
 
 type GameplayRuntimeOptions = {
   host?: GameplayRuntimeHost;
@@ -31,6 +31,8 @@ export function createGameplayRuntime({
         targetId
       });
     },
+    getActor: sceneStore.getActor,
+    getActors: sceneStore.getActors,
     getEntity: sceneStore.getEntity,
     getEntityWorldTransform: sceneStore.getEntityWorldTransform,
     getHookTarget: sceneStore.getHookTarget,
@@ -45,12 +47,18 @@ export function createGameplayRuntime({
     getTargetWorldTransform: sceneStore.getTargetWorldTransform,
     getWorldState: sceneStore.getWorldState,
     onEvent: eventBus.subscribe,
+    removeActor(actorId: string) {
+      sceneStore.removeActor(actorId);
+    },
     resetTargetLocalTransform: sceneStore.resetTargetLocalTransform,
     setLocalState: sceneStore.setLocalState,
     setPlayerState: sceneStore.setPlayerState,
     setTargetLocalTransform: sceneStore.setTargetLocalTransform,
     setWorldState: sceneStore.setWorldState,
-    translateTarget: sceneStore.translateTarget
+    translateTarget: sceneStore.translateTarget,
+    updateActor(actor: GameplayActor) {
+      sceneStore.upsertActor(actor);
+    }
   };
   const context: GameplayRuntimeSystemContext = {
     ...api,

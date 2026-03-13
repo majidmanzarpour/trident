@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createGameplayRuntime,
   createMoverSystemDefinition,
   createOpenableSystemDefinition,
   createPathMoverSystemDefinition,
+  createSequenceSystemDefinition,
+  createTriggerSystemDefinition,
   createWaypointPath
 } from "@web-hammer/gameplay-runtime";
 import {
@@ -20,6 +22,7 @@ import { createSampleScene, resolveSampleAssetPath } from "./sample-scene";
 
 const SAMPLE_DOOR_ID = "node:sample:door-root";
 const SAMPLE_PATH_ID = "node:sample:spire-group";
+const SAMPLE_PLATFORM_ID = "node:sample:platform-root";
 
 export function App() {
   const [scene, setScene] = useState<WebHammerEngineScene>(createSampleScene());
@@ -32,7 +35,9 @@ export function App() {
   const [enabledSystems, setEnabledSystems] = useState({
     mover: true,
     openable: true,
-    pathMover: true
+    pathMover: true,
+    sequence: true,
+    trigger: true
   });
   const [resolveAssetPath, setResolveAssetPath] = useState<(path: string) => Promise<string> | string>(() => resolveSampleAssetPath);
   const bundleResolverRef = useRef<ReturnType<typeof createWebHammerBundleAssetResolver> | undefined>(undefined);
@@ -43,6 +48,40 @@ export function App() {
   const renderScene = useMemo(() => createPlaybackRenderScene(scene), [scene]);
   const gameplaySystems = useMemo(() => {
     const systems = [];
+    const samplePaths = new Map([
+      [
+        SAMPLE_PATH_ID,
+        createWaypointPath(
+          [
+            { x: -2.8, y: 0, z: -1.5 },
+            { x: -1.25, y: 0, z: -0.4 },
+            { x: -2.8, y: 0, z: 0.95 },
+            { x: -4.35, y: 0, z: -0.4 },
+            { x: -2.8, y: 0, z: -1.5 }
+          ],
+          true
+        )
+      ],
+      [
+        SAMPLE_PLATFORM_ID,
+        createWaypointPath(
+          [
+            { x: 1.6, y: 0.45, z: 3.8 },
+            { x: 1.6, y: 1.3, z: 1.8 },
+            { x: 4.2, y: 1.3, z: 1.8 },
+            { x: 4.2, y: 0.45, z: 3.8 }
+          ]
+        )
+      ]
+    ]);
+
+    if (enabledSystems.trigger) {
+      systems.push(createTriggerSystemDefinition());
+    }
+
+    if (enabledSystems.sequence) {
+      systems.push(createSequenceSystemDefinition());
+    }
 
     if (enabledSystems.openable) {
       systems.push(createOpenableSystemDefinition());
@@ -53,20 +92,9 @@ export function App() {
     }
 
     if (enabledSystems.pathMover) {
-      const samplePath = createWaypointPath(
-        [
-          { x: -2.8, y: 0, z: -1.5 },
-          { x: -1.25, y: 0, z: -0.4 },
-          { x: -2.8, y: 0, z: 0.95 },
-          { x: -4.35, y: 0, z: -0.4 },
-          { x: -2.8, y: 0, z: -1.5 }
-        ],
-        true
-      );
-
       systems.push(
         createPathMoverSystemDefinition((target) =>
-          target.hook.type === "path_mover" && target.targetId === SAMPLE_PATH_ID ? samplePath : undefined
+          target.hook.type === "path_mover" ? samplePaths.get(target.targetId) : undefined
         )
       );
     }
@@ -85,6 +113,14 @@ export function App() {
       }),
     [gameplaySystems, scene.entities, scene.nodes]
   );
+  const handlePlayerActorChange = useCallback((actor: { id: string; position: { x: number; y: number; z: number }; tags: string[] } | null) => {
+    if (actor) {
+      gameplayRuntime.updateActor(actor);
+      return;
+    }
+
+    gameplayRuntime.removeActor("player");
+  }, [gameplayRuntime]);
 
   useEffect(() => {
     setCameraMode(normalizedSceneSettings.player.cameraMode);
@@ -217,6 +253,7 @@ export function App() {
           cameraMode={cameraMode}
           gameplayRuntime={gameplayRuntime}
           onNodeObjectChange={gameplayHostRef.current.bindNodeObject}
+          onPlayerActorChange={handlePlayerActorChange}
           physicsRevision={physicsRevision}
           physicsPlayback={physicsPlayback}
           renderScene={renderScene}
@@ -234,6 +271,8 @@ export function App() {
         </div>
         <div className="runtime-panel__section">
           {([
+            ["trigger", "Trigger"],
+            ["sequence", "Sequence"],
             ["openable", "Openable"],
             ["mover", "Mover"],
             ["pathMover", "Path Mover"]
@@ -262,6 +301,7 @@ export function App() {
             <button onClick={() => emitRuntimeEvent("path.start", SAMPLE_PATH_ID)} type="button">Path Start</button>
             <button onClick={() => emitRuntimeEvent("path.stop", SAMPLE_PATH_ID)} type="button">Path Stop</button>
             <button onClick={() => emitRuntimeEvent("path.reverse", SAMPLE_PATH_ID)} type="button">Path Reverse</button>
+            <button onClick={() => emitRuntimeEvent("path.start", SAMPLE_PLATFORM_ID)} type="button">Platform Start</button>
           </div>
         </div>
         <div className="runtime-panel__section">

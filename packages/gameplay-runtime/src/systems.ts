@@ -1,5 +1,13 @@
 import { vec3, type GameplayObject, type GameplayValue, type Transform, type Vec3 } from "@web-hammer/shared";
-import { type GameplayPathDefinition, type GameplayPathResolver, type GameplayRuntimeSystemDefinition, type GameplaySystemBlueprint } from "./types";
+import {
+  type GameplayActor,
+  type GameplayHookTarget,
+  type GameplayPathDefinition,
+  type GameplayPathResolver,
+  type GameplayRuntimeSystemContext,
+  type GameplayRuntimeSystemDefinition,
+  type GameplaySystemBlueprint
+} from "./types";
 
 export const GAMEPLAY_SYSTEM_BLUEPRINTS: GameplaySystemBlueprint[] = [
   {
@@ -12,7 +20,7 @@ export const GAMEPLAY_SYSTEM_BLUEPRINTS: GameplaySystemBlueprint[] = [
     description: "Overlap checks, enter/exit tracking, fire-once, cooldowns, and actor filtering.",
     hookTypes: ["trigger_volume"],
     id: "trigger",
-    implemented: false,
+    implemented: true,
     label: "TriggerSystem"
   },
   {
@@ -110,7 +118,7 @@ export const GAMEPLAY_SYSTEM_BLUEPRINTS: GameplaySystemBlueprint[] = [
     description: "Runs ordered action lists triggered by events.",
     hookTypes: ["sequence"],
     id: "sequence",
-    implemented: false,
+    implemented: true,
     label: "SequenceSystem"
   },
   {
@@ -121,6 +129,169 @@ export const GAMEPLAY_SYSTEM_BLUEPRINTS: GameplaySystemBlueprint[] = [
     label: "ConditionSystem"
   }
 ];
+
+export function createTriggerSystemDefinition(): GameplayRuntimeSystemDefinition {
+  return {
+    description: "Tracks actors overlapping trigger hooks and emits enter, exit, and stay events.",
+    hookTypes: ["trigger_volume"],
+    id: "trigger",
+    label: "TriggerSystem",
+    create(context) {
+      const triggerStates = new Map<string, TriggerRuntimeState>();
+
+      return {
+        stop() {
+          triggerStates.clear();
+        },
+        update() {
+          context.getHookTargetsByType("trigger_volume")
+            .filter((target) => target.hook.enabled !== false)
+            .forEach((target) => {
+              const worldTransform = context.getTargetWorldTransform(target.targetId);
+
+              if (!worldTransform) {
+                return;
+              }
+
+              const state = ensureTriggerRuntimeState(triggerStates, target.hook.id);
+              const nextInsideActorIds = new Set<string>();
+              const fireOnce = readBoolean(target.hook.config.fireOnce, false);
+
+              context.getActors().forEach((actor) => {
+                if (!matchesTriggerFilters(actor, target.hook.config)) {
+                  return;
+                }
+
+                if (!isActorInsideTrigger(actor, target.hook.config, worldTransform)) {
+                  return;
+                }
+
+                nextInsideActorIds.add(actor.id);
+
+                if (!state.insideActorIds.has(actor.id)) {
+                  if (!fireOnce || !state.fired) {
+                    const now = performance.now();
+
+                    if (now >= state.nextAllowedAt) {
+                      emitTriggerEvent(context, target, "trigger.enter", actor);
+                      state.fired = true;
+                      state.nextAllowedAt = now + Math.max(0, readNumber(target.hook.config.cooldown, 0)) * 1000;
+                    }
+                  }
+
+                  return;
+                }
+
+                if (!fireOnce) {
+                  emitTriggerEvent(context, target, "trigger.stay", actor);
+                }
+              });
+
+              state.insideActorIds.forEach((actorId) => {
+                if (nextInsideActorIds.has(actorId)) {
+                  return;
+                }
+
+                const actor = context.getActor(actorId);
+
+                if (actor) {
+                  emitTriggerEvent(context, target, "trigger.exit", actor);
+                } else {
+                  context.emitFromHookTarget(target, "trigger.exit", { actorId });
+                }
+              });
+
+              state.insideActorIds = nextInsideActorIds;
+            });
+        }
+      };
+    }
+  };
+}
+
+export function createSequenceSystemDefinition(): GameplayRuntimeSystemDefinition {
+  return {
+    description: "Runs ordered actions when configured trigger events arrive.",
+    hookTypes: ["sequence"],
+    id: "sequence",
+    label: "SequenceSystem",
+    create(context) {
+      const runners: SequenceRunner[] = [];
+      const onceTriggeredHookIds = new Set<string>();
+      const unsubscribe = context.eventBus.subscribe((event) => {
+        context.getHookTargetsByType("sequence")
+          .filter((target) => target.hook.enabled !== false)
+          .forEach((target) => {
+            const trigger = asObject(target.hook.config.trigger);
+
+            if (!trigger) {
+              return;
+            }
+
+            const fromEntity = readString(trigger.fromEntity, "");
+            const triggerEvent = readString(trigger.event, "");
+            const once = readBoolean(trigger.once, false);
+
+            if (event.sourceId !== fromEntity || event.event !== triggerEvent) {
+              return;
+            }
+
+            if (once && onceTriggeredHookIds.has(target.hook.id)) {
+              return;
+            }
+
+            if (once) {
+              onceTriggeredHookIds.add(target.hook.id);
+            }
+
+            const runner: SequenceRunner = {
+              actionIndex: 0,
+              actions: asObjectArray(target.hook.config.actions),
+              hookTarget: target,
+              waitRemaining: 0
+            };
+
+            context.emitFromHookTarget(target, "sequence.started", {
+              event: event.event,
+              sourceId: event.sourceId
+            });
+            const completed = advanceSequenceRunner(context, runner);
+
+            if (!completed) {
+              runners.push(runner);
+            }
+          });
+      });
+
+      return {
+        stop() {
+          unsubscribe();
+          runners.splice(0, runners.length);
+          onceTriggeredHookIds.clear();
+        },
+        update(deltaSeconds) {
+          for (let index = runners.length - 1; index >= 0; index -= 1) {
+            const runner = runners[index];
+
+            if (runner.waitRemaining > 0) {
+              runner.waitRemaining = Math.max(0, runner.waitRemaining - deltaSeconds);
+
+              if (runner.waitRemaining > 0) {
+                continue;
+              }
+            }
+
+            const completed = advanceSequenceRunner(context, runner);
+
+            if (completed) {
+              runners.splice(index, 1);
+            }
+          }
+        }
+      };
+    }
+  };
+}
 
 export function createOpenableSystemDefinition(): GameplayRuntimeSystemDefinition {
   return {
@@ -139,7 +310,10 @@ export function createOpenableSystemDefinition(): GameplayRuntimeSystemDefinitio
           context.getHookTargetsByType("openable")
             .filter((target) => target.targetId === event.targetId && target.hook.enabled !== false)
             .forEach((target) => {
-              const currentState = readOpenableState(context.getLocalState(target.targetId, "openable:state"), resolveOpenableInitialState(target.hook.config));
+              const currentState = readOpenableState(
+                context.getLocalState(target.targetId, "openable:state"),
+                resolveOpenableInitialState(target.hook.config)
+              );
               const nextState =
                 event.event === "toggle.requested"
                   ? currentState === "open" || currentState === "opening"
@@ -225,7 +399,11 @@ export function createMoverSystemDefinition(): GameplayRuntimeSystemDefinition {
                 : event.event === "close.started"
                   ? "closed"
                   : readStateName(event.payload);
-            const targetTransform = resolveMoverTargetTransform(target.hook.config, state, context.getTargetInitialLocalTransform(target.targetId));
+            const targetTransform = resolveMoverTargetTransform(
+              target.hook.config,
+              state,
+              context.getTargetInitialLocalTransform(target.targetId)
+            );
             const currentTransform = context.getTargetLocalTransform(target.targetId);
 
             if (!targetTransform || !currentTransform) {
@@ -390,6 +568,206 @@ export function createWaypointPath(points: Vec3[], loop = false): GameplayPathDe
   };
 }
 
+type TriggerRuntimeState = {
+  fired: boolean;
+  insideActorIds: Set<string>;
+  nextAllowedAt: number;
+};
+
+type SequenceRunner = {
+  actionIndex: number;
+  actions: GameplayObject[];
+  hookTarget: GameplayHookTarget;
+  waitRemaining: number;
+};
+
+function ensureTriggerRuntimeState(store: Map<string, TriggerRuntimeState>, hookId: string): TriggerRuntimeState {
+  const existing = store.get(hookId);
+
+  if (existing) {
+    return existing;
+  }
+
+  const created: TriggerRuntimeState = {
+    fired: false,
+    insideActorIds: new Set<string>(),
+    nextAllowedAt: 0
+  };
+
+  store.set(hookId, created);
+  return created;
+}
+
+function emitTriggerEvent(
+  context: GameplayRuntimeSystemContext,
+  target: GameplayHookTarget,
+  eventName: "trigger.enter" | "trigger.exit" | "trigger.stay",
+  actor: GameplayActor
+) {
+  context.emitFromHookTarget(target, eventName, {
+    actorId: actor.id,
+    actorTags: actor.tags ?? []
+  });
+}
+
+function matchesTriggerFilters(actor: GameplayActor, config: GameplayObject) {
+  const filters = readStringArray(config.filters);
+
+  if (filters.length === 0) {
+    return true;
+  }
+
+  return (actor.tags ?? []).some((tag) => filters.includes(tag));
+}
+
+function isActorInsideTrigger(actor: GameplayActor, config: GameplayObject, transform: Transform) {
+  const shape = readString(config.shape, "box");
+
+  if (shape === "sphere") {
+    const radius = Math.max(0.001, readNumber(config.radius, 1)) * maxScaleComponent(transform.scale);
+    return distanceSquared(actor.position, transform.position) <= radius * radius;
+  }
+
+  if (shape === "capsule") {
+    const radius = Math.max(0.001, readNumber(config.radius, 0.5)) * Math.max(transform.scale.x, transform.scale.z);
+    const height = Math.max(radius * 2, readNumber(config.height, radius * 2) * transform.scale.y);
+    const segmentHalf = Math.max(0, height * 0.5 - radius);
+    const start = vec3(transform.position.x, transform.position.y - segmentHalf, transform.position.z);
+    const end = vec3(transform.position.x, transform.position.y + segmentHalf, transform.position.z);
+
+    return distanceToSegmentSquared(actor.position, start, end) <= radius * radius;
+  }
+
+  const size = readVec3(config.size, vec3(1, 1, 1));
+  const halfExtents = vec3(
+    Math.abs(size.x * transform.scale.x) * 0.5,
+    Math.abs(size.y * transform.scale.y) * 0.5,
+    Math.abs(size.z * transform.scale.z) * 0.5
+  );
+
+  return (
+    Math.abs(actor.position.x - transform.position.x) <= halfExtents.x &&
+    Math.abs(actor.position.y - transform.position.y) <= halfExtents.y &&
+    Math.abs(actor.position.z - transform.position.z) <= halfExtents.z
+  );
+}
+
+function advanceSequenceRunner(context: GameplayRuntimeSystemContext, runner: SequenceRunner) {
+  while (runner.actionIndex < runner.actions.length) {
+    const action = runner.actions[runner.actionIndex];
+    const actionType = readString(action.type, "");
+
+    context.emitFromHookTarget(runner.hookTarget, "sequence.step", {
+      actionIndex: runner.actionIndex,
+      actionType
+    });
+
+    runner.actionIndex += 1;
+
+    if (actionType === "wait") {
+      runner.waitRemaining = Math.max(0, readNumber(action.seconds, 0));
+
+      if (runner.waitRemaining > 0) {
+        return false;
+      }
+
+      continue;
+    }
+
+    executeSequenceAction(context, runner.hookTarget, action);
+  }
+
+  context.emitFromHookTarget(runner.hookTarget, "sequence.completed");
+  return true;
+}
+
+function executeSequenceAction(
+  context: GameplayRuntimeSystemContext,
+  hookTarget: GameplayHookTarget,
+  action: GameplayObject
+) {
+  const actionType = readString(action.type, "");
+
+  if (actionType === "emit") {
+    const eventName = readString(action.event, "");
+    const targetId = readString(action.target, hookTarget.targetId);
+
+    if (!eventName) {
+      return;
+    }
+
+    context.emitEvent({
+      event: eventName,
+      payload: action.payload,
+      sourceHookType: hookTarget.hook.type,
+      sourceId: hookTarget.targetId,
+      sourceKind: hookTarget.targetKind,
+      targetId
+    });
+    return;
+  }
+
+  if (actionType === "set_flag") {
+    const flag = readString(action.flag, "");
+
+    if (!flag) {
+      return;
+    }
+
+    context.setWorldState(flag, action.value ?? null);
+    context.emitFromHookTarget(hookTarget, "flag.changed", {
+      flag,
+      value: action.value ?? null
+    });
+    return;
+  }
+
+  if (actionType === "enable" || actionType === "disable") {
+    const targetId = readString(action.target, "");
+
+    if (!targetId) {
+      return;
+    }
+
+    context.getHookTargets()
+      .filter((target) => target.targetId === targetId)
+      .forEach((target) => {
+        target.hook.enabled = actionType === "enable";
+      });
+    return;
+  }
+
+  if (actionType === "spawn") {
+    const targetId = readString(action.target, "");
+
+    if (targetId) {
+      context.emitEvent({
+        event: "spawn.requested",
+        sourceHookType: hookTarget.hook.type,
+        sourceId: hookTarget.targetId,
+        sourceKind: hookTarget.targetKind,
+        targetId
+      });
+    }
+
+    return;
+  }
+
+  if (actionType === "destroy") {
+    const targetId = readString(action.target, "");
+
+    if (targetId) {
+      context.emitEvent({
+        event: "destroy.requested",
+        sourceHookType: hookTarget.hook.type,
+        sourceId: hookTarget.targetId,
+        sourceKind: hookTarget.targetKind,
+        targetId
+      });
+    }
+  }
+}
+
 function resolveOpenableInitialState(config: GameplayObject) {
   return readString(config.initialState, "closed") === "open" ? "open" : "closed";
 }
@@ -411,7 +789,7 @@ function resolveMoverTargetTransform(config: GameplayObject, state: string, fall
   };
 }
 
-function ensurePathState(context: Parameters<Exclude<GameplayRuntimeSystemDefinition["create"], undefined>>[0], targetId: string, config: GameplayObject) {
+function ensurePathState(context: GameplayRuntimeSystemContext, targetId: string, config: GameplayObject) {
   const current = asObject(context.getLocalState(targetId, "path_mover:state"));
 
   if (current) {
@@ -448,6 +826,39 @@ function interpolateVec3(from: Vec3, to: Vec3, progress: number): Vec3 {
   );
 }
 
+function distanceSquared(left: Vec3, right: Vec3) {
+  const dx = left.x - right.x;
+  const dy = left.y - right.y;
+  const dz = left.z - right.z;
+
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function distanceToSegmentSquared(point: Vec3, start: Vec3, end: Vec3) {
+  const segment = vec3(end.x - start.x, end.y - start.y, end.z - start.z);
+  const segmentLengthSquared = distanceSquared(start, end);
+
+  if (segmentLengthSquared <= 0.000001) {
+    return distanceSquared(point, start);
+  }
+
+  const projection = clampProgress(
+    ((point.x - start.x) * segment.x + (point.y - start.y) * segment.y + (point.z - start.z) * segment.z) /
+      segmentLengthSquared
+  );
+  const closest = vec3(
+    start.x + segment.x * projection,
+    start.y + segment.y * projection,
+    start.z + segment.z * projection
+  );
+
+  return distanceSquared(point, closest);
+}
+
+function maxScaleComponent(scale: Vec3) {
+  return Math.max(Math.abs(scale.x), Math.abs(scale.y), Math.abs(scale.z));
+}
+
 function readOpenableState(value: GameplayValue | undefined, fallback: "closed" | "open") {
   return value === "opening" || value === "closing" || value === "open" || value === "closed" ? value : fallback;
 }
@@ -466,6 +877,10 @@ function readStateName(payload: unknown) {
 
 function readString(value: GameplayValue | undefined, fallback: string) {
   return typeof value === "string" ? value : fallback;
+}
+
+function readStringArray(value: GameplayValue | undefined) {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
 function readNumber(value: GameplayValue | undefined, fallback: number) {
@@ -490,6 +905,10 @@ function readVec3(value: GameplayValue | undefined, fallback: Vec3) {
 
 function asObject(value: GameplayValue | undefined) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function asObjectArray(value: GameplayValue | undefined) {
+  return Array.isArray(value) ? value.map((entry) => asObject(entry)).filter((entry): entry is GameplayObject => Boolean(entry)) : [];
 }
 
 function clampProgress(value: number) {
