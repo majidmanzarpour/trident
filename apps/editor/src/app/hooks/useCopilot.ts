@@ -4,7 +4,7 @@ import type { CopilotSession } from "@/lib/copilot/types";
 import { runAgenticLoop } from "@/lib/copilot/agentic-loop";
 import { createCopilotProvider } from "@/lib/copilot/provider";
 import { buildSystemPrompt } from "@/lib/copilot/system-prompt";
-import { loadCopilotSettings, hasCopilotApiKey } from "@/lib/copilot/settings";
+import { loadCopilotSettings, isCopilotConfigured } from "@/lib/copilot/settings";
 import { COPILOT_TOOL_DECLARATIONS } from "@/lib/copilot/tool-declarations";
 import { executeTool } from "@/lib/copilot/tool-executor";
 
@@ -16,11 +16,11 @@ const EMPTY_SESSION: CopilotSession = {
 
 export function useCopilot(editor: EditorCore) {
   const [session, setSession] = useState<CopilotSession>(EMPTY_SESSION);
-  const [configured, setConfigured] = useState(hasCopilotApiKey);
+  const [configured, setConfigured] = useState(() => isCopilotConfigured());
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const check = () => setConfigured(hasCopilotApiKey());
+    const check = () => setConfigured(isCopilotConfigured());
     window.addEventListener("focus", check);
     window.addEventListener("storage", check);
     return () => {
@@ -33,11 +33,13 @@ export function useCopilot(editor: EditorCore) {
     async (prompt: string) => {
       const settings = loadCopilotSettings();
 
-      if (!settings.apiKey) {
+      if (!isCopilotConfigured(settings)) {
         setSession((prev) => ({
           ...prev,
           status: "error",
-          error: "No API key configured. Open Copilot settings to add one."
+          error: settings.provider === "codex"
+            ? 'Codex not configured. Run "codex login" in your terminal.'
+            : "No API key configured. Open Vibe settings to add one."
         }));
         return;
       }
@@ -45,29 +47,48 @@ export function useCopilot(editor: EditorCore) {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const provider = createCopilotProvider();
+      const copilotProvider = createCopilotProvider(settings.provider);
       const systemPrompt = buildSystemPrompt(editor);
 
-      await runAgenticLoop(
-        prompt,
-        session.messages,
-        {
-          maxIterations: 25,
-          provider,
-          providerConfig: {
-            apiKey: settings.apiKey,
-            model: settings.model,
-            temperature: settings.temperature
-          },
-          systemPrompt,
+      const providerConfig = {
+        apiKey: settings.provider === "gemini" ? settings.gemini.apiKey : "",
+        model: settings.provider === "gemini" ? settings.gemini.model : settings.codex.model,
+        temperature: settings.temperature
+      };
+
+      if (copilotProvider.kind === "session-based") {
+        // Codex path: provider manages its own tool-calling loop
+        await copilotProvider.provider.runSession({
+          messages: session.messages,
+          userPrompt: prompt,
           tools: COPILOT_TOOL_DECLARATIONS,
+          systemPrompt,
+          providerConfig,
           executeTool: (toolCall) => executeTool(editor, toolCall),
           onUpdate: (updated) => {
             setSession({ ...updated, messages: [...updated.messages] });
-          }
-        },
-        controller.signal
-      );
+          },
+          signal: controller.signal
+        });
+      } else {
+        // Gemini path: agentic loop
+        await runAgenticLoop(
+          prompt,
+          session.messages,
+          {
+            maxIterations: 25,
+            provider: copilotProvider.provider,
+            providerConfig,
+            systemPrompt,
+            tools: COPILOT_TOOL_DECLARATIONS,
+            executeTool: (toolCall) => executeTool(editor, toolCall),
+            onUpdate: (updated) => {
+              setSession({ ...updated, messages: [...updated.messages] });
+            }
+          },
+          controller.signal
+        );
+      }
 
       abortRef.current = null;
     },
@@ -91,6 +112,6 @@ export function useCopilot(editor: EditorCore) {
     abort,
     clearHistory,
     isConfigured: configured,
-    refreshConfigured: () => setConfigured(hasCopilotApiKey())
+    refreshConfigured: () => setConfigured(isCopilotConfigured())
   };
 }
